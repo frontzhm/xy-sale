@@ -1,15 +1,47 @@
 import Link from "next/link";
 
+import {
+  ProductListFilterBanner,
+  ProductListFilterInvalidBanner,
+} from "@/components/product-list-filter-banner";
+import { TableSearchBar } from "@/components/table-search-bar";
+import { inboundListWhereFromQ, mergeWhereAnd, trimSearchQ } from "@/lib/list-search";
+import { resolveProductListFilter } from "@/lib/products/list-filter";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { photoPublicUrl } from "@/lib/storage/photo-url";
 
-export default async function InboundListPage() {
-  const records = await prisma.inboundRecord.findMany({
-    orderBy: { recordedAt: "desc" },
-    include: {
-      lines: { select: { quantity: true } },
-    },
-  });
+type Search = { productId?: string; q?: string };
+
+export default async function InboundListPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Search>;
+}) {
+  const sp = (await searchParams) ?? {};
+  const qRaw = trimSearchQ(sp.q);
+  const filter = await resolveProductListFilter(sp.productId);
+
+  const noRows =
+    !filter.invalidProductId && filter.skuIds !== null && filter.skuIds.length === 0;
+
+  const productLineWhere =
+    !filter.invalidProductId && filter.skuIds !== null && filter.skuIds.length > 0
+      ? { lines: { some: { skuId: { in: filter.skuIds } } } }
+      : undefined;
+
+  const textWhere = inboundListWhereFromQ(qRaw);
+  const where = mergeWhereAnd<Prisma.InboundRecordWhereInput>(productLineWhere, textWhere);
+
+  const records = noRows
+    ? []
+    : await prisma.inboundRecord.findMany({
+        where,
+        orderBy: { recordedAt: "desc" },
+        include: {
+          lines: { select: { quantity: true } },
+        },
+      });
 
   return (
     <div className="space-y-6">
@@ -17,7 +49,7 @@ export default async function InboundListPage() {
         <div>
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">入库登记</h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            已收到货：每条记录对应一次入库照片与明细件数，可与厂家发货对账。
+            每条记录对应一次入库照片与明细。从衣服档案点击「入库」件数可只显示含该款的登记。
           </p>
         </div>
         <Link
@@ -28,9 +60,37 @@ export default async function InboundListPage() {
         </Link>
       </div>
 
+      {filter.invalidProductId ? (
+        <ProductListFilterInvalidBanner
+          clearHref={qRaw ? `/inbound?q=${encodeURIComponent(qRaw)}` : "/inbound"}
+        />
+      ) : filter.product ? (
+        <ProductListFilterBanner
+          product={filter.product}
+          clearHref={qRaw ? `/inbound?q=${encodeURIComponent(qRaw)}` : "/inbound"}
+        />
+      ) : null}
+
+      <TableSearchBar
+        basePath="/inbound"
+        defaultQ={qRaw}
+        placeholder="备注、衣服 ID / 名称…"
+        preserveParams={
+          filter.product && !filter.invalidProductId ? { productId: filter.product.id } : undefined
+        }
+      />
+
       {records.length === 0 ? (
         <p className="rounded-lg border border-dashed border-zinc-300 py-12 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          暂无记录。点击「登记入库」添加第一条。
+          {filter.skuIds !== null && filter.skuIds.length === 0
+            ? "该款暂无 SKU，无法匹配入库明细。"
+            : filter.skuIds !== null
+              ? qRaw
+                ? `没有符合「${qRaw}」且包含该款的入库登记。`
+                : "没有包含该款的入库登记。"
+              : qRaw
+                ? `没有符合「${qRaw}」的入库登记。`
+                : "暂无记录。点击「登记入库」添加第一条。"}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">

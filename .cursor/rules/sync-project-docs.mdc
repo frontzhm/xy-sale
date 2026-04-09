@@ -1,0 +1,19 @@
+---
+description: 功能或数据变更时同步更新 md/ 项目文档
+alwaysApply: true
+---
+
+# 与 `md/` 文档同步
+
+本仓库架构与数据关系写在 **`md/`**（见 `md/README.md`）。完成涉及下列内容的改动后，**在同一提交或紧随其后的提交里**更新对应文档，避免文档与代码脱节。
+
+| 改动类型 | 应更新的文档 |
+|----------|----------------|
+| `prisma/schema.prisma`（模型、字段、关系、删除策略） | `md/data-model.md` |
+| 对货口径、汇总维度、公式（如欠发/在途）或 `lib/reports/reconciliation.ts` | `md/data-model.md`；若 UI 说明文案变了，核对 `md/data-model.md` 与 `reports/page.tsx` |
+| 新路由、新模块、Server Actions 职责、存储/API 流程 | `md/architecture.md` |
+| 仅改 `md/` 内互链或索引 | `md/README.md` |
+
+**原则**：单一事实来源仍是代码与 `schema.prisma`；`md/` 用简短中文说明「是什么、关系如何、口径如何」，不写与代码重复的冗长片段。
+
+若变更很小且文档已准确，可在 PR/提交说明中写「文档无需更新」并简述理由。

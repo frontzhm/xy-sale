@@ -1,16 +1,48 @@
 import Link from "next/link";
 
+import {
+  ProductListFilterBanner,
+  ProductListFilterInvalidBanner,
+} from "@/components/product-list-filter-banner";
+import { TableSearchBar } from "@/components/table-search-bar";
+import { mergeWhereAnd, shipmentListWhereFromQ, trimSearchQ } from "@/lib/list-search";
+import { resolveProductListFilter } from "@/lib/products/list-filter";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { photoPublicUrl } from "@/lib/storage/photo-url";
 
-export default async function ShipmentsPage() {
-  const shipments = await prisma.shipmentRecord.findMany({
-    orderBy: { recordedAt: "desc" },
-    include: {
-      manufacturer: { select: { name: true } },
-      lines: { select: { quantity: true } },
-    },
-  });
+type Search = { productId?: string; q?: string };
+
+export default async function ShipmentsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Search>;
+}) {
+  const sp = (await searchParams) ?? {};
+  const qRaw = trimSearchQ(sp.q);
+  const filter = await resolveProductListFilter(sp.productId);
+
+  const noRows =
+    !filter.invalidProductId && filter.skuIds !== null && filter.skuIds.length === 0;
+
+  const productLineWhere =
+    !filter.invalidProductId && filter.skuIds !== null && filter.skuIds.length > 0
+      ? { lines: { some: { skuId: { in: filter.skuIds } } } }
+      : undefined;
+
+  const textWhere = shipmentListWhereFromQ(qRaw);
+  const where = mergeWhereAnd<Prisma.ShipmentRecordWhereInput>(productLineWhere, textWhere);
+
+  const shipments = noRows
+    ? []
+    : await prisma.shipmentRecord.findMany({
+        where,
+        orderBy: { recordedAt: "desc" },
+        include: {
+          manufacturer: { select: { name: true } },
+          lines: { select: { quantity: true } },
+        },
+      });
 
   return (
     <div className="space-y-6">
@@ -18,7 +50,7 @@ export default async function ShipmentsPage() {
         <div>
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">厂家发货</h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            已发货未到货：每条记录对应一次厂家发货照片与明细件数。
+            每条记录对应一次厂家发货照片与明细。从衣服档案点击「发货」件数可只显示含该款的登记。
           </p>
         </div>
         <Link
@@ -29,9 +61,37 @@ export default async function ShipmentsPage() {
         </Link>
       </div>
 
+      {filter.invalidProductId ? (
+        <ProductListFilterInvalidBanner
+          clearHref={qRaw ? `/shipments?q=${encodeURIComponent(qRaw)}` : "/shipments"}
+        />
+      ) : filter.product ? (
+        <ProductListFilterBanner
+          product={filter.product}
+          clearHref={qRaw ? `/shipments?q=${encodeURIComponent(qRaw)}` : "/shipments"}
+        />
+      ) : null}
+
+      <TableSearchBar
+        basePath="/shipments"
+        defaultQ={qRaw}
+        placeholder="备注、登记厂家、衣服 ID / 名称…"
+        preserveParams={
+          filter.product && !filter.invalidProductId ? { productId: filter.product.id } : undefined
+        }
+      />
+
       {shipments.length === 0 ? (
         <p className="rounded-lg border border-dashed border-zinc-300 py-12 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          暂无记录。点击「登记发货」添加第一条。
+          {filter.skuIds !== null && filter.skuIds.length === 0
+            ? "该款暂无 SKU，无法匹配发货明细。"
+            : filter.skuIds !== null
+              ? qRaw
+                ? `没有符合「${qRaw}」且包含该款的登记。`
+                : "没有包含该款的厂家发货登记。"
+              : qRaw
+                ? `没有符合「${qRaw}」的厂家发货登记。`
+                : "暂无记录。点击「登记发货」添加第一条。"}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
