@@ -107,7 +107,9 @@ function rollupSkuRowsToProducts(skuRows: SkuReconciliationRow[]): ProductReconc
   return [...map.values()].sort((a, b) => {
     const m = a.manufacturerName.localeCompare(b.manufacturerName, "zh-CN");
     if (m !== 0) return m;
-    return a.productCode.localeCompare(b.productCode, "zh-CN");
+    const n = a.nameInbound.localeCompare(b.nameInbound, "zh-CN");
+    if (n !== 0) return n;
+    return a.productId.localeCompare(b.productId);
   });
 }
 
@@ -284,7 +286,11 @@ export async function getReconciliationReport(): Promise<{
   skuRows.sort((a, b) => {
     const m = a.manufacturerName.localeCompare(b.manufacturerName, "zh-CN");
     if (m !== 0) return m;
-    return a.productCode.localeCompare(b.productCode) || a.color.localeCompare(b.color);
+    const n = a.nameInbound.localeCompare(b.nameInbound, "zh-CN");
+    if (n !== 0) return n;
+    const p = a.productId.localeCompare(b.productId);
+    if (p !== 0) return p;
+    return a.color.localeCompare(b.color) || a.size.localeCompare(b.size);
   });
 
   const aggByMfr = new Map<string, { ordered: number; shipped: number; inbound: number }>();

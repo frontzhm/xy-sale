@@ -51,7 +51,7 @@ export default async function ReportsPage({ searchParams }: { searchParams?: Pro
           <TableSearchBar
             basePath="/reports"
             defaultQ={qRaw}
-            placeholder="厂家、衣服 ID、入库名、颜色尺码、提示文案…"
+            placeholder="厂家、入库名、厂家发货名、颜色尺码、提示文案…"
           />
         </div>
       </div>
@@ -111,7 +111,7 @@ export default async function ReportsPage({ searchParams }: { searchParams?: Pro
       <section className="space-y-3">
         <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">按衣服汇总</h2>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          将同一档案下所有 SKU 的订货、厂家发货、入库件数相加；欠发、在途算法与上方说明一致。点击衣服 ID 可进入档案查看各 SKU 明细。
+          将同一档案下所有 SKU 的订货、厂家发货、入库件数相加；欠发、在途算法与上方说明一致。点击入库名称可进入档案查看各 SKU 明细。
         </p>
         {byProduct.length === 0 ? (
           <p className="rounded-lg border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
@@ -125,7 +125,6 @@ export default async function ReportsPage({ searchParams }: { searchParams?: Pro
               <thead>
                 <tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
                   <th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">厂家</th>
-                  <th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">衣服 ID</th>
                   <th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">入库名称</th>
                   <th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">订货</th>
                   <th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">发货</th>
@@ -141,16 +140,13 @@ export default async function ReportsPage({ searchParams }: { searchParams?: Pro
                     className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/80"
                   >
                     <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{p.manufacturerName}</td>
-                    <td className="px-4 py-3 font-mono text-xs">
+                    <td className="max-w-[240px] truncate px-4 py-3 text-zinc-700 dark:text-zinc-300">
                       <Link
                         href={`/products/${p.productId}`}
                         className="font-medium text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
                       >
-                        {p.productCode}
+                        {p.nameInbound}
                       </Link>
-                    </td>
-                    <td className="max-w-[200px] truncate px-4 py-3 text-zinc-700 dark:text-zinc-300">
-                      {p.nameInbound}
                     </td>
                     <td className="px-4 py-3">
                       <Num value={p.ordered} />
@@ -192,7 +188,7 @@ export default async function ReportsPage({ searchParams }: { searchParams?: Pro
               <thead>
                 <tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
                   <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">厂家</th>
-                  <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">衣服 ID</th>
+                  <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">入库名称</th>
                   <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">颜色/尺码</th>
                   <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">订</th>
                   <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">发</th>
@@ -209,8 +205,13 @@ export default async function ReportsPage({ searchParams }: { searchParams?: Pro
                     className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/80"
                   >
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{r.manufacturerName}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-zinc-800 dark:text-zinc-200">
-                      {r.productCode}
+                    <td className="max-w-[160px] truncate px-3 py-2 text-zinc-800 dark:text-zinc-200">
+                      <Link
+                        href={`/products/${r.productId}`}
+                        className="underline-offset-2 hover:underline"
+                      >
+                        {r.nameInbound}
+                      </Link>
                     </td>
                     <td className="px-3 py-2 text-zinc-800 dark:text-zinc-200">
                       {r.color} / {r.size}
@@ -258,7 +259,6 @@ export default async function ReportsPage({ searchParams }: { searchParams?: Pro
               <thead>
                 <tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
                   <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">厂家</th>
-                  <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">衣服 ID</th>
                   <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">入库名</th>
                   <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">颜色/尺码</th>
                   <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">订</th>
@@ -275,11 +275,13 @@ export default async function ReportsPage({ searchParams }: { searchParams?: Pro
                     className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/80"
                   >
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{r.manufacturerName}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-zinc-800 dark:text-zinc-200">
-                      {r.productCode}
-                    </td>
-                    <td className="max-w-[160px] truncate px-3 py-2 text-zinc-700 dark:text-zinc-300">
-                      {r.nameInbound}
+                    <td className="max-w-[200px] truncate px-3 py-2 text-zinc-700 dark:text-zinc-300">
+                      <Link
+                        href={`/products/${r.productId}`}
+                        className="text-zinc-800 underline-offset-2 hover:underline dark:text-zinc-200"
+                      >
+                        {r.nameInbound}
+                      </Link>
                     </td>
                     <td className="px-3 py-2 text-zinc-800 dark:text-zinc-200">
                       {r.color} / {r.size}

@@ -21,7 +21,7 @@ export default async function NewProductPage() {
         </Link>
         <h1 className="mt-2 text-xl font-semibold text-zinc-900 dark:text-zinc-50">新建衣服档案</h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          衣服 ID 在保存时自动生成。主图会写入服务器{" "}
+          保存后系统会在内部生成唯一编号。主图会写入服务器{" "}
           <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-900">storage/photos</code>。
         </p>
       </div>

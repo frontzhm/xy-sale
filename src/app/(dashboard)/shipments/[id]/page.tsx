@@ -19,7 +19,6 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<P
             include: {
               product: {
                 select: {
-                  code: true,
                   nameInbound: true,
                   nameManufacturer: true,
                 },
@@ -82,9 +81,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<P
                 return (
                   <li key={line.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
                     <div>
-                      <p className="font-medium text-zinc-900 dark:text-zinc-100">
-                        {pr.code} · {pr.nameManufacturer}
-                      </p>
+                      <p className="font-medium text-zinc-900 dark:text-zinc-100">{pr.nameManufacturer}</p>
                       <p className="text-zinc-500 dark:text-zinc-400">
                         入库名：{pr.nameInbound} · {line.sku.color} / {line.sku.size}
                       </p>

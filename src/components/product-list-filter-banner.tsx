@@ -4,15 +4,15 @@ export function ProductListFilterBanner({
   product,
   clearHref,
 }: {
-  product: { code: string; nameInbound: string };
+  product: { nameManufacturer: string; nameInbound: string };
   clearHref: string;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
       <span>
         当前按衣服筛选：
-        <span className="font-mono font-medium">{product.code}</span>
-        <span className="text-sky-800/90 dark:text-sky-200/90"> · {product.nameInbound}</span>
+        <span className="font-medium">{product.nameManufacturer}</span>
+        <span className="text-sky-800/90 dark:text-sky-200/90"> · 入库：{product.nameInbound}</span>
       </span>
       <Link href={clearHref} className="shrink-0 font-medium underline-offset-2 hover:underline">
         清除筛选

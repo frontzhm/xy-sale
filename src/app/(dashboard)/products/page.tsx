@@ -1,10 +1,24 @@
+"use client";
+
+import { ProTable } from "@ant-design/pro-components";
+import type { ProColumns } from "@ant-design/pro-components";
+import { useRequest } from "ahooks";
+import { Space } from "antd";
 import Link from "next/link";
 
-import { TableSearchBar } from "@/components/table-search-bar";
-import { productListWhereFromQ, trimSearchQ } from "@/lib/list-search";
-import { prisma } from "@/lib/prisma";
-import { getProductMovementTotalsMap } from "@/lib/reports/reconciliation";
 import { photoPublicUrl } from "@/lib/storage/photo-url";
+
+type ProductTableRow = {
+  id: string;
+  nameInbound: string;
+  manufacturerName: string;
+  skuCount: number;
+  ordered: number;
+  shipped: number;
+  inbound: number;
+  shortageVsShipped: number;
+  imageFileName: string | null;
+};
 
 function QtyLink({
   href,
@@ -33,22 +47,158 @@ function QtyLink({
   );
 }
 
-type Search = { q?: string };
-
-export default async function ProductsPage({ searchParams }: { searchParams?: Promise<Search> }) {
-  const sp = (await searchParams) ?? {};
-  const qRaw = trimSearchQ(sp.q);
-
-  const products = await prisma.product.findMany({
-    where: productListWhereFromQ(qRaw),
-    orderBy: { updatedAt: "desc" },
-    include: {
-      manufacturer: { select: { name: true } },
-      skus: { select: { id: true } },
+const columns: ProColumns<ProductTableRow>[] = [
+  {
+    title: "关键词",
+    dataIndex: "q",
+    hideInTable: true,
+    fieldProps: {
+      placeholder: "入库名、厂家发货名、厂家名称…",
     },
-  });
+  },
+  {
+    title: "主图",
+    dataIndex: "imageFileName",
+    width: 88,
+    search: false,
+    render: (_, row) =>
+      row.imageFileName ? (
+        // eslint-disable-next-line @next/next/no-img-element -- 本地 API 动态地址
+        <img
+          src={photoPublicUrl(row.imageFileName)}
+          alt=""
+          className="h-12 w-12 rounded-md border border-zinc-200 object-cover dark:border-zinc-700"
+        />
+      ) : (
+        <span className="inline-flex h-12 w-12 items-center justify-center rounded-md border border-dashed border-zinc-300 text-xs text-zinc-400 dark:border-zinc-600">
+          无
+        </span>
+      ),
+  },
+  {
+    title: "入库名称",
+    dataIndex: "nameInbound",
+    ellipsis: true,
+    width: 160,
+    search: false,
+  },
+  {
+    title: "厂家",
+    dataIndex: "manufacturerName",
+    ellipsis: true,
+    width: 120,
+    search: false,
+  },
+  {
+    title: "SKU",
+    dataIndex: "skuCount",
+    width: 72,
+    align: "right",
+    search: false,
+  },
+  {
+    title: "订货",
+    dataIndex: "ordered",
+    width: 80,
+    align: "right",
+    search: false,
+    render: (_, row) => (
+      <QtyLink
+        href={`/orders?productId=${encodeURIComponent(row.id)}`}
+        value={row.ordered}
+        title="查看含该款的订货单"
+      />
+    ),
+  },
+  {
+    title: "发货",
+    dataIndex: "shipped",
+    width: 80,
+    align: "right",
+    search: false,
+    render: (_, row) => (
+      <QtyLink
+        href={`/shipments?productId=${encodeURIComponent(row.id)}`}
+        value={row.shipped}
+        title="查看含该款的厂家发货登记"
+      />
+    ),
+  },
+  {
+    title: "入库",
+    dataIndex: "inbound",
+    width: 80,
+    align: "right",
+    search: false,
+    render: (_, row) => (
+      <QtyLink
+        href={`/inbound?productId=${encodeURIComponent(row.id)}`}
+        value={row.inbound}
+        title="查看含该款的入库登记"
+      />
+    ),
+  },
+  {
+    title: "欠发",
+    dataIndex: "shortageVsShipped",
+    width: 80,
+    align: "right",
+    search: false,
+    render: (_, row) => (
+      <QtyLink
+        href={`/products/${row.id}#product-reconciliation`}
+        value={row.shortageVsShipped}
+        warnNegative
+        title="欠发 = 订货 − 发货；查看该款对货汇总与各 SKU"
+      />
+    ),
+  },
+  {
+    title: "操作",
+    valueType: "option",
+    width: 120,
+    fixed: "right",
+    search: false,
+    render: (_, row) => (
+      <Space size="middle" wrap>
+        <Link
+          href={`/products/${row.id}`}
+          className="text-sm font-medium text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300"
+        >
+          查看
+        </Link>
+        <Link
+          href={`/products/${row.id}/edit`}
+          className="text-sm font-medium text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300"
+        >
+          编辑
+        </Link>
+      </Space>
+    ),
+  },
+];
 
-  const movementById = await getProductMovementTotalsMap(products);
+export default function ProductsPage() {
+  const { runAsync } = useRequest(
+    async (vars: { current?: number; pageSize?: number; q?: string }) => {
+      const sp = new URLSearchParams();
+      sp.set("current", String(vars.current ?? 1));
+      sp.set("pageSize", String(vars.pageSize ?? 20));
+      const q = vars.q?.trim();
+      if (q) sp.set("q", q);
+      const res = await fetch(`/api/products/table?${sp.toString()}`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "加载失败");
+      }
+      return res.json() as Promise<{
+        data: ProductTableRow[];
+        total: number;
+        success?: boolean;
+      }>;
+    },
+    { manual: true },
+  );
 
   return (
     <div className="space-y-6">
@@ -56,10 +206,10 @@ export default async function ProductsPage({ searchParams }: { searchParams?: Pr
         <div>
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">衣服档案</h1>
           <p className="mt-1 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
-            维护衣服 ID、名称、厂家与 SKU。下表汇总该款在所有 SKU 上的
+            维护款名、厂家与 SKU。下表汇总该款在所有 SKU 上的
             <strong className="font-medium text-zinc-800 dark:text-zinc-200">订货 / 厂家发货 / 入库</strong>
             件数（与「统计 / 对货」口径一致）。
-            <span className="block mt-1">
+            <span className="mt-1 block">
               点击<strong className="font-medium text-zinc-800 dark:text-zinc-200">蓝色数字</strong>
               可打开对应模块列表（已按该款筛选）；点击
               <strong className="font-medium text-zinc-800 dark:text-zinc-200">欠发</strong>
@@ -75,116 +225,41 @@ export default async function ProductsPage({ searchParams }: { searchParams?: Pr
         </Link>
       </div>
 
-      <TableSearchBar
-        basePath="/products"
-        defaultQ={qRaw}
-        placeholder="衣服 ID、入库名、厂家发货名、厂家名称…"
-      />
-
-      {products.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-zinc-300 py-12 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          {qRaw ? `没有符合「${qRaw}」的档案。` : "暂无档案。点击「新建档案」添加第一件。"}
-        </p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
-          <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
-            <thead>
-              <tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
-                <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">主图</th>
-                <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">衣服 ID</th>
-                <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">入库名称</th>
-                <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">厂家</th>
-                <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">SKU</th>
-                <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">订货</th>
-                <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">发货</th>
-                <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">入库</th>
-                <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">欠发</th>
-                <th className="px-3 py-3 font-medium text-zinc-700 dark:text-zinc-300">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {products.map((p: (typeof products)[number]) => {
-                const m = movementById.get(p.id)!;
-                const pidQs = `productId=${encodeURIComponent(p.id)}`;
-                return (
-                  <tr
-                    key={p.id}
-                    className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/80"
-                  >
-                    <td className="px-3 py-3">
-                      {p.imageFileName ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- 本地 API 动态地址
-                        <img
-                          src={photoPublicUrl(p.imageFileName)}
-                          alt=""
-                          className="h-12 w-12 rounded-md border border-zinc-200 object-cover dark:border-zinc-700"
-                        />
-                      ) : (
-                        <span className="inline-flex h-12 w-12 items-center justify-center rounded-md border border-dashed border-zinc-300 text-xs text-zinc-400 dark:border-zinc-600">
-                          无
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 font-mono text-zinc-900 dark:text-zinc-100">{p.code}</td>
-                    <td className="max-w-[160px] truncate px-3 py-3 text-zinc-800 dark:text-zinc-200">
-                      {p.nameInbound}
-                    </td>
-                    <td className="max-w-[120px] truncate px-3 py-3 text-zinc-600 dark:text-zinc-400">
-                      {p.manufacturer.name}
-                    </td>
-                    <td className="px-3 py-3 text-zinc-600 dark:text-zinc-400">{p.skus.length}</td>
-                    <td className="px-3 py-3">
-                      <QtyLink
-                        href={`/orders?${pidQs}`}
-                        value={m.ordered}
-                        title="查看含该款的订货单"
-                      />
-                    </td>
-                    <td className="px-3 py-3">
-                      <QtyLink
-                        href={`/shipments?${pidQs}`}
-                        value={m.shipped}
-                        title="查看含该款的厂家发货登记"
-                      />
-                    </td>
-                    <td className="px-3 py-3">
-                      <QtyLink
-                        href={`/inbound?${pidQs}`}
-                        value={m.inbound}
-                        title="查看含该款的入库登记"
-                      />
-                    </td>
-                    <td className="px-3 py-3">
-                      <QtyLink
-                        href={`/products/${p.id}#product-reconciliation`}
-                        value={m.shortageVsShipped}
-                        warnNegative
-                        title="欠发 = 订货 − 发货；查看该款对货汇总与各 SKU"
-                      />
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex flex-wrap gap-2">
-                        <Link
-                          href={`/products/${p.id}`}
-                          className="text-sm font-medium text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300"
-                        >
-                          查看
-                        </Link>
-                        <Link
-                          href={`/products/${p.id}/edit`}
-                          className="text-sm font-medium text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300"
-                        >
-                          编辑
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="products-pro-table-wrap overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+        <ProTable<ProductTableRow>
+          columns={columns}
+          rowKey="id"
+          request={async (params) => {
+            const r = await runAsync({
+              current: params.current,
+              pageSize: params.pageSize,
+              q: typeof params.q === "string" ? params.q : undefined,
+            });
+            return {
+              data: r.data,
+              total: r.total,
+              success: true,
+            };
+          }}
+          search={{
+            labelWidth: "auto",
+            defaultCollapsed: false,
+          }}
+          options={false}
+          pagination={{
+            defaultPageSize: 20,
+            pageSizeOptions: [10, 20, 50, 100],
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 条`,
+          }}
+          scroll={{ x: 1080 }}
+          size="small"
+          tableLayout="fixed"
+          ghost
+          dateFormatter="string"
+          toolBarRender={false}
+        />
+      </div>
     </div>
   );
 }

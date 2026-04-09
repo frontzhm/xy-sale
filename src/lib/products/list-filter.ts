@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 export type ProductListFilterResolved = {
   /** null = 不按衣服筛选；[] = 该款无 SKU，不应出现任何明细行 */
   skuIds: string[] | null;
-  product: { id: string; code: string; nameInbound: string } | null;
+  product: { id: string; nameInbound: string; nameManufacturer: string } | null;
   /** URL 上带了 productId 但数据库无此款 */
   invalidProductId: boolean;
 };
@@ -19,7 +19,7 @@ export async function resolveProductListFilter(
 
   const product = await prisma.product.findUnique({
     where: { id: raw },
-    select: { id: true, code: true, nameInbound: true },
+    select: { id: true, nameInbound: true, nameManufacturer: true },
   });
 
   if (!product) {

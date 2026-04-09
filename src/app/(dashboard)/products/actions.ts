@@ -178,7 +178,7 @@ export async function createProduct(
   }
 
   if (!saved) {
-    return { error: "生成衣服 ID 时发生冲突，请重试。" };
+    return { error: "保存时与已有档案冲突，请重试。" };
   }
 
   revalidatePath("/products");

@@ -10,7 +10,7 @@
 |------|------|
 | 框架 | Next.js 16（App Router） |
 | 语言 | TypeScript 5 |
-| UI | React 19、Tailwind CSS 4、Ant Design 6（根布局通过 `@ant-design/nextjs-registry` 做 SSR 样式） |
+| UI | React 19、Tailwind CSS 4、Ant Design 6、**@ant-design/pro-components**（如衣服档案 `ProTable`）；根布局通过 `@ant-design/nextjs-registry` 做 SSR 样式 |
 | 数据访问 | Prisma 6 + `@prisma/client` |
 | 数据库 | 开发默认 SQLite（`DATABASE_URL` 指向本地文件）；生产可换 PostgreSQL（改 `provider` 与 URL） |
 | 包管理 | pnpm 10；Node ≥ 22（见 `package.json` engines、`.nvmrc`） |

@@ -31,11 +31,10 @@ export default async function EditOrderPage({ params }: { params: Promise<Params
       },
     }),
     prisma.product.findMany({
-      orderBy: [{ code: "asc" }],
+      orderBy: [{ nameInbound: "asc" }],
       select: {
         id: true,
         manufacturerId: true,
-        code: true,
         nameInbound: true,
         nameManufacturer: true,
         skus: {
@@ -56,7 +55,7 @@ export default async function EditOrderPage({ params }: { params: Promise<Params
   const catalog: ShipmentCatalogProduct[] = products.map((p) => ({
     id: p.id,
     manufacturerId: p.manufacturerId,
-    label: `${p.code} · ${p.nameManufacturer}（入库：${p.nameInbound}）`,
+    label: `${p.nameManufacturer}（入库：${p.nameInbound}）`,
     skus: p.skus.map((s) => ({
       id: s.id,
       label: `${s.color} / ${s.size}`,

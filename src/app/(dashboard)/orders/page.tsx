@@ -78,7 +78,7 @@ export default async function OrdersPage({
       <TableSearchBar
         basePath="/orders"
         defaultQ={qRaw}
-        placeholder="备注、厂家名、衣服 ID / 名称…"
+        placeholder="备注、厂家名、入库名、厂家发货名…"
         preserveParams={
           filter.product && !filter.invalidProductId ? { productId: filter.product.id } : undefined
         }

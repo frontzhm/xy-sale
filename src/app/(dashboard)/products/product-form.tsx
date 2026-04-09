@@ -9,7 +9,6 @@ import { photoPublicUrl } from "@/lib/storage/photo-url";
 export type ManufacturerOption = { id: string; name: string };
 
 export type ProductFormInitial = {
-  code: string;
   manufacturerId: string;
   nameInbound: string;
   nameManufacturer: string;
@@ -118,21 +117,6 @@ export function ProductForm({ manufacturers, mode, productId, initial }: Product
       <section className="space-y-4">
         <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">基本信息</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          {mode === "create" ? (
-            <div className="sm:col-span-2">
-              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">衣服 ID</p>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                保存时由系统自动生成唯一编号，无需填写。
-              </p>
-            </div>
-          ) : (
-            <div className="sm:col-span-2">
-              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">衣服 ID</p>
-              <p className="mt-1 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-sm text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200">
-                {initial?.code}
-              </p>
-            </div>
-          )}
           <label className="block text-sm sm:col-span-2">
             <span className="text-zinc-700 dark:text-zinc-300">
               入库登记名称 <span className="text-red-600">*</span>

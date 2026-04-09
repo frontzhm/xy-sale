@@ -61,10 +61,6 @@ export default async function ProductDetailPage({ params }: { params: Promise<Pa
         <div className="space-y-6 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
           <dl className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">衣服 ID</dt>
-              <dd className="mt-1 font-mono text-sm text-zinc-900 dark:text-zinc-100">{product.code}</dd>
-            </div>
-            <div className="sm:col-span-2">
               <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">厂家</dt>
               <dd className="mt-1 text-zinc-900 dark:text-zinc-100">{product.manufacturer.name}</dd>
             </div>

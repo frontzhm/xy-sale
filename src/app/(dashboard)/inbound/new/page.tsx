@@ -7,10 +7,9 @@ import type { ShipmentCatalogProduct } from "../../shipments/shipment-form";
 
 export default async function NewInboundPage() {
   const products = await prisma.product.findMany({
-    orderBy: [{ code: "asc" }],
+    orderBy: [{ nameInbound: "asc" }],
     select: {
       id: true,
-      code: true,
       nameInbound: true,
       nameManufacturer: true,
       skus: {
@@ -22,7 +21,7 @@ export default async function NewInboundPage() {
 
   const catalog: ShipmentCatalogProduct[] = products.map((p) => ({
     id: p.id,
-    label: `${p.code} · ${p.nameManufacturer}（入库：${p.nameInbound}）`,
+    label: `${p.nameManufacturer}（入库：${p.nameInbound}）`,
     skus: p.skus.map((s) => ({
       id: s.id,
       label: `${s.color} / ${s.size}`,

@@ -28,7 +28,6 @@ export default async function EditProductPage({ params }: { params: Promise<Para
   });
 
   const initial: ProductFormInitial = {
-    code: product.code,
     manufacturerId: product.manufacturerId,
     nameInbound: product.nameInbound,
     nameManufacturer: product.nameManufacturer,

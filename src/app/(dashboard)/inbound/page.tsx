@@ -74,7 +74,7 @@ export default async function InboundListPage({
       <TableSearchBar
         basePath="/inbound"
         defaultQ={qRaw}
-        placeholder="备注、衣服 ID / 名称…"
+        placeholder="备注、入库名、厂家发货名…"
         preserveParams={
           filter.product && !filter.invalidProductId ? { productId: filter.product.id } : undefined
         }
