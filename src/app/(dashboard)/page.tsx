@@ -22,6 +22,15 @@ export default function HomePage() {
         </li>
         <li>
           <Link
+            href="/orders"
+            className="block rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
+          >
+            <span className="font-medium text-zinc-900 dark:text-zinc-50">订货</span>
+            <p className="mt-1 text-sm text-zinc-500">按 SKU 录入订货件数，参与统计欠发</p>
+          </Link>
+        </li>
+        <li>
+          <Link
             href="/shipments"
             className="block rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
           >
@@ -44,7 +53,7 @@ export default function HomePage() {
             className="block rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
           >
             <span className="font-medium text-zinc-900 dark:text-zinc-50">统计 / 对货</span>
-            <p className="mt-1 text-sm text-zinc-500">按厂家欠货、收发差异等（待实现查询）</p>
+            <p className="mt-1 text-sm text-zinc-500">按厂家汇总；SKU 欠发、在途与入库异常提示</p>
           </Link>
         </li>
       </ul>

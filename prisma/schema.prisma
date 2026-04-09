@@ -16,6 +16,7 @@ model Manufacturer {
   updatedAt DateTime  @updatedAt
   products  Product[]
   shipments ShipmentRecord[]
+  orders    Order[]
 }
 
 /// 衣服主数据
@@ -56,11 +57,13 @@ model ProductSku {
 
 /// 订货单（头）
 model Order {
-  id        String      @id @default(cuid())
-  note      String?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  lines     OrderLine[]
+  id             String        @id @default(cuid())
+  manufacturerId String?
+  manufacturer   Manufacturer? @relation(fields: [manufacturerId], references: [id], onDelete: SetNull)
+  note           String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  lines          OrderLine[]
 }
 
 model OrderLine {
