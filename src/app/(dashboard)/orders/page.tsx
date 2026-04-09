@@ -1,15 +1,19 @@
 import Link from "next/link";
 
+import { manufacturerNamesByIds, orderManufacturerIdsByOrderIds } from "@/lib/orders/order-manufacturer";
 import { prisma } from "@/lib/prisma";
 
 export default async function OrdersPage() {
   const orders = await prisma.order.findMany({
     orderBy: { createdAt: "desc" },
     include: {
-      manufacturer: { select: { name: true } },
       lines: { select: { quantity: true } },
     },
   });
+
+  const mfrIdByOrder = await orderManufacturerIdsByOrderIds(orders.map((o) => o.id));
+  const mfrIds = [...new Set([...mfrIdByOrder.values()].filter((x): x is string => Boolean(x)))];
+  const mfrNames = await manufacturerNamesByIds(mfrIds);
 
   return (
     <div className="space-y-6">
@@ -48,6 +52,8 @@ export default async function OrdersPage() {
             <tbody>
               {orders.map((o: (typeof orders)[number]) => {
                 const totalQty = o.lines.reduce((acc, l) => acc + l.quantity, 0);
+                const mid = mfrIdByOrder.get(o.id);
+                const mfrLabel = mid ? (mfrNames.get(mid) ?? "—") : "—";
                 return (
                   <tr
                     key={o.id}
@@ -57,7 +63,7 @@ export default async function OrdersPage() {
                       {new Date(o.createdAt).toLocaleString("zh-CN")}
                     </td>
                     <td className="max-w-[160px] truncate px-4 py-3 text-zinc-600 dark:text-zinc-400">
-                      {o.manufacturer?.name ?? "—"}
+                      {mfrLabel}
                     </td>
                     <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{o.lines.length}</td>
                     <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">

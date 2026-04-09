@@ -1,37 +1,44 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { manufacturerNamesByIds, orderManufacturerIdsByOrderIds } from "@/lib/orders/order-manufacturer";
 import { prisma } from "@/lib/prisma";
 
 type Params = { id: string };
 
 export default async function OrderDetailPage({ params }: { params: Promise<Params> }) {
   const { id } = await params;
-  const order = await prisma.order.findUnique({
-    where: { id },
-    include: {
-      manufacturer: { select: { name: true } },
-      lines: {
-        orderBy: { id: "asc" },
-        include: {
-          sku: {
-            include: {
-              product: {
-                select: {
-                  code: true,
-                  nameInbound: true,
-                  nameManufacturer: true,
-                  manufacturer: { select: { name: true } },
+  const [order, mfrIdByOrder] = await Promise.all([
+    prisma.order.findUnique({
+      where: { id },
+      include: {
+        lines: {
+          orderBy: { id: "asc" },
+          include: {
+            sku: {
+              include: {
+                product: {
+                  select: {
+                    code: true,
+                    nameInbound: true,
+                    nameManufacturer: true,
+                    manufacturer: { select: { name: true } },
+                  },
                 },
               },
             },
           },
         },
       },
-    },
-  });
+    }),
+    orderManufacturerIdsByOrderIds([id]),
+  ]);
 
   if (!order) notFound();
+
+  const headerMfrId = mfrIdByOrder.get(id) ?? null;
+  const headerMfrNames = headerMfrId ? await manufacturerNamesByIds([headerMfrId]) : new Map();
+  const headerManufacturerName = headerMfrId ? headerMfrNames.get(headerMfrId) : undefined;
 
   const totalQty = order.lines.reduce((acc, l) => acc + l.quantity, 0);
 
@@ -58,7 +65,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<Para
         </p>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
           订货厂家：
-          {order.manufacturer?.name ??
+          {headerManufacturerName ??
             order.lines[0]?.sku.product.manufacturer.name ??
             "—"}
         </p>

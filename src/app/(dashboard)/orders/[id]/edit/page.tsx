@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { orderManufacturerIdsByOrderIds } from "@/lib/orders/order-manufacturer";
 import { prisma } from "@/lib/prisma";
 
 import { OrderForm, type OrderFormInitial } from "../../order-form";
@@ -11,7 +12,7 @@ type Params = { id: string };
 export default async function EditOrderPage({ params }: { params: Promise<Params> }) {
   const { id } = await params;
 
-  const [order, products, manufacturers] = await Promise.all([
+  const [order, products, manufacturers, mfrIdByOrder] = await Promise.all([
     prisma.order.findUnique({
       where: { id },
       include: {
@@ -47,6 +48,7 @@ export default async function EditOrderPage({ params }: { params: Promise<Params
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
+    orderManufacturerIdsByOrderIds([id]),
   ]);
 
   if (!order) notFound();
@@ -62,7 +64,7 @@ export default async function EditOrderPage({ params }: { params: Promise<Params
   }));
 
   const inferredManufacturerId =
-    order.manufacturerId ?? order.lines[0]?.sku.product.manufacturerId ?? null;
+    mfrIdByOrder.get(id) ?? order.lines[0]?.sku.product.manufacturerId ?? null;
 
   const initial: OrderFormInitial = {
     manufacturerId: inferredManufacturerId,

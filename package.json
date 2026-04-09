@@ -7,7 +7,9 @@
   },
   "packageManager": "pnpm@10.6.5",
   "scripts": {
+    "predev": "prisma generate",
     "dev": "next dev",
+    "prebuild": "prisma generate",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
