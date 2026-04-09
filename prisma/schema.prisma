@@ -1,0 +1,120 @@
+// 对货系统 — 开发默认 SQLite，生产可改为 PostgreSQL（调整 provider 与 DATABASE_URL）
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// 厂家
+model Manufacturer {
+  id        String    @id @default(cuid())
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+  shipments ShipmentRecord[]
+}
+
+/// 衣服主数据
+model Product {
+  id               String   @id @default(cuid())
+  code             String   @unique // 衣服 ID
+  nameInbound      String // 入库登记名称
+  nameManufacturer String // 厂家发货名称
+  costPrice        Decimal?
+  wholesalePrice   Decimal?
+  retailPrice      Decimal?
+  material         String? // 棉 / 麻 / 真丝 / 自定义
+  imageFileName    String? // 主图文件名（位于 storage/photos/）
+  imageMimeType    String? // 主图 MIME
+  manufacturerId   String
+  manufacturer     Manufacturer @relation(fields: [manufacturerId], references: [id], onDelete: Restrict)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  skus             ProductSku[]
+}
+
+/// 颜色 + 尺码 唯一确定一款可计数 SKU
+model ProductSku {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  color     String
+  size      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orderLines    OrderLine[]
+  shipmentLines ShipmentLine[]
+  inboundLines  InboundLine[]
+
+  @@unique([productId, color, size])
+}
+
+/// 订货单（头）
+model Order {
+  id        String      @id @default(cuid())
+  note      String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  lines     OrderLine[]
+}
+
+model OrderLine {
+  id        String     @id @default(cuid())
+  orderId   String
+  order     Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  skuId     String
+  sku       ProductSku @relation(fields: [skuId], references: [id], onDelete: Restrict)
+  quantity  Int
+  createdAt DateTime   @default(now())
+}
+
+/// 厂家发货登记（照片存档 + 行明细）
+model ShipmentRecord {
+  id               String         @id @default(cuid())
+  manufacturerId   String?
+  manufacturer     Manufacturer?  @relation(fields: [manufacturerId], references: [id], onDelete: SetNull)
+  photoFileName    String // 发货照片文件名（storage/photos/）
+  photoMimeType    String
+  note             String?
+  recordedAt       DateTime       @default(now()) // 业务上可改登记时间则后续加字段
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  lines            ShipmentLine[]
+}
+
+model ShipmentLine {
+  id         String         @id @default(cuid())
+  recordId   String
+  record     ShipmentRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  skuId      String
+  sku        ProductSku     @relation(fields: [skuId], references: [id], onDelete: Restrict)
+  quantity   Int
+  createdAt  DateTime       @default(now())
+}
+
+/// 入库登记（照片存档 + 行明细）
+model InboundRecord {
+  id              String        @id @default(cuid())
+  photoFileName   String
+  photoMimeType   String
+  note            String?
+  recordedAt      DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  lines           InboundLine[]
+}
+
+model InboundLine {
+  id        String        @id @default(cuid())
+  recordId  String
+  record    InboundRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  skuId     String
+  sku       ProductSku    @relation(fields: [skuId], references: [id], onDelete: Restrict)
+  quantity  Int
+  createdAt DateTime      @default(now())
+}
