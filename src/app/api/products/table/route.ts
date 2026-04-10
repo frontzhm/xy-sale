@@ -56,10 +56,25 @@ export async function GET(req: NextRequest) {
   const current = Math.max(1, parseInt(searchParams.get("current") ?? "1", 10) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") ?? "20", 10) || 20));
 
+  const inboundFromStr = searchParams.get("inboundDateFrom");
+  const inboundToStr = searchParams.get("inboundDateTo");
+  let inboundRecordedAtFrom: Date | undefined;
+  let inboundRecordedAtTo: Date | undefined;
+  if (inboundFromStr && inboundToStr) {
+    const f = new Date(inboundFromStr);
+    const t = new Date(inboundToStr);
+    if (!Number.isNaN(f.getTime()) && !Number.isNaN(t.getTime())) {
+      inboundRecordedAtFrom = f;
+      inboundRecordedAtTo = t;
+    }
+  }
+
   const where = productListWhereFromTableFilters({
     nameInbound: searchParams.get("nameInbound"),
     manufacturerId: searchParams.get("manufacturerId"),
     material: searchParams.get("material"),
+    inboundRecordedAtFrom,
+    inboundRecordedAtTo,
   });
 
   const sortField = parseSortField(searchParams.get("sortField"));

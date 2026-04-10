@@ -4,6 +4,8 @@ import { ProTable } from "@ant-design/pro-components";
 import type { ProColumns } from "@ant-design/pro-components";
 import { useRequest } from "ahooks";
 import { Space } from "antd";
+import type { Dayjs } from "dayjs";
+import dayjs from "dayjs";
 import Link from "next/link";
 import { useMemo } from "react";
 
@@ -37,6 +39,22 @@ function pickMovementSort(sort: unknown): { field: string; order: "asc" | "desc"
     if (v === "descend") return { field: k, order: "desc" };
   }
   return null;
+}
+
+/** 入库登记日期区间 → 接口用 ISO；清空则不传（不按入库日筛选） */
+function inboundDateRangeToApiParams(range: unknown): { from: string; to: string } | null {
+  if (!range || !Array.isArray(range) || range.length !== 2) return null;
+  const [a, b] = range;
+  if (a == null || b == null) return null;
+  const d1 = dayjs(a as string | Date | Dayjs);
+  const d2 = dayjs(b as string | Date | Dayjs);
+  if (!d1.isValid() || !d2.isValid()) return null;
+  const start = d1.valueOf() <= d2.valueOf() ? d1 : d2;
+  const end = d1.valueOf() <= d2.valueOf() ? d2 : d1;
+  return {
+    from: start.startOf("day").toISOString(),
+    to: end.endOf("day").toISOString(),
+  };
 }
 
 function QtyLink({
@@ -94,11 +112,18 @@ type TableRequestVars = {
   searchNameInbound?: string;
   manufacturerId?: string;
   searchMaterial?: string;
+  inboundDateFrom?: string;
+  inboundDateTo?: string;
   sortField?: string;
   sortOrder?: "asc" | "desc";
 };
 
 export default function ProductsPage() {
+  const inboundDateDefault = useMemo((): [Dayjs, Dayjs] => {
+    const d = dayjs();
+    return [d.startOf("day"), d.endOf("day")];
+  }, []);
+
   const { data: mfrPayload, loading: mfrLoading } = useRequest(async () => {
     const res = await fetch("/api/manufacturers/options");
     if (!res.ok) throw new Error("加载厂家失败");
@@ -134,6 +159,17 @@ export default function ProductsPage() {
         dataIndex: "searchMaterial",
         hideInTable: true,
         fieldProps: { placeholder: "模糊匹配材质" },
+      },
+      {
+        title: "入库日期",
+        dataIndex: "inboundDateRange",
+        hideInTable: true,
+        valueType: "dateRange",
+        colSize: 1.25,
+        fieldProps: {
+          allowClear: true,
+          placeholder: ["开始日期", "结束日期"],
+        },
       },
       {
         title: "主图",
@@ -290,6 +326,10 @@ export default function ProductsPage() {
       if (mid) sp.set("manufacturerId", mid);
       const smt = vars.searchMaterial?.trim();
       if (smt) sp.set("material", smt);
+      if (vars.inboundDateFrom && vars.inboundDateTo) {
+        sp.set("inboundDateFrom", vars.inboundDateFrom);
+        sp.set("inboundDateTo", vars.inboundDateTo);
+      }
       if (vars.sortField) {
         sp.set("sortField", vars.sortField);
         sp.set("sortOrder", vars.sortOrder ?? "desc");
@@ -337,8 +377,14 @@ export default function ProductsPage() {
         <ProTable<ProductTableRow>
           columns={columns}
           rowKey="id"
+          form={{
+            initialValues: {
+              inboundDateRange: inboundDateDefault,
+            },
+          }}
           request={async (params, sort) => {
             const sm = pickMovementSort(sort);
+            const inboundIso = inboundDateRangeToApiParams(params.inboundDateRange);
             const r = await runAsync({
               current: params.current,
               pageSize: params.pageSize,
@@ -350,6 +396,8 @@ export default function ProductsPage() {
                   : undefined,
               searchMaterial:
                 typeof params.searchMaterial === "string" ? params.searchMaterial : undefined,
+              inboundDateFrom: inboundIso?.from,
+              inboundDateTo: inboundIso?.to,
               sortField: sm?.field,
               sortOrder: sm?.order,
             });
