@@ -1,18 +1,61 @@
 "use client";
 
-import { ProTable } from "@ant-design/pro-components";
-import type { ProColumns, ProFormInstance } from "@ant-design/pro-components";
+import { BetaSchemaForm, ProTable } from "@ant-design/pro-components";
+import type {
+  ActionType,
+  ProColumns,
+  ProFormColumnsType,
+  ProFormInstance,
+} from "@ant-design/pro-components";
 import { useDebounceFn, useRequest } from "ahooks";
-import { Space } from "antd";
+import { Button, Space, Upload, message } from "antd";
+import type { UploadFile } from "antd";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
 import isoWeek from "dayjs/plugin/isoWeek";
 import Link from "next/link";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 
+import { createProductInline } from "./actions";
 import { photoPublicUrl } from "@/lib/storage/photo-url";
 
 dayjs.extend(isoWeek);
+
+type NewProductFormValues = {
+  manufacturerId?: string;
+  newManufacturerName?: string;
+  nameInbound?: string;
+  nameManufacturer?: string;
+  costPrice?: string;
+  wholesalePrice?: string;
+  retailPrice?: string;
+  material?: string;
+  image?: UploadFile[];
+  skus?: { color?: string; size?: string }[];
+};
+
+function newProductValuesToFormData(values: NewProductFormValues): FormData {
+  const fd = new FormData();
+  fd.set("nameInbound", String(values.nameInbound ?? "").trim());
+  fd.set("nameManufacturer", String(values.nameManufacturer ?? "").trim());
+  fd.set("material", String(values.material ?? "").trim());
+  const mid = String(values.manufacturerId ?? "").trim();
+  if (mid) fd.set("manufacturerId", mid);
+  fd.set("newManufacturerName", String(values.newManufacturerName ?? "").trim());
+  fd.set("costPrice", String(values.costPrice ?? "").trim());
+  fd.set("wholesalePrice", String(values.wholesalePrice ?? "").trim());
+  fd.set("retailPrice", String(values.retailPrice ?? "").trim());
+  const skus = (values.skus ?? [])
+    .map((r) => ({
+      color: String(r?.color ?? "").trim(),
+      size: String(r?.size ?? "").trim(),
+    }))
+    .filter((r) => r.color && r.size);
+  fd.set("skusJson", JSON.stringify(skus));
+  const f = values.image?.[0]?.originFileObj;
+  if (f) fd.set("image", f);
+  return fd;
+}
 
 /** 入库日期 RangePicker 快捷项（value 用函数，点击时取当前时间） */
 const INBOUND_DATE_RANGE_PRESETS: {
@@ -156,7 +199,9 @@ type TableRequestVars = {
 };
 
 export default function ProductsPage() {
+  const [newProductOpen, setNewProductOpen] = useState(false);
   const searchFormRef = useRef<ProFormInstance>(undefined);
+  const actionRef = useRef<ActionType>(undefined);
 
   /** ProTable 请求参数来自「查询提交」后的 formSearch；直接 reload 不会带上未提交的表单，必须用 submit 同步 */
   const { run: scheduleSubmitSearch, cancel: cancelDebouncedSubmit } = useDebounceFn(
@@ -166,11 +211,6 @@ export default function ProductsPage() {
     { wait: 320 },
   );
 
-  const inboundDateDefault = useMemo((): [Dayjs, Dayjs] => {
-    const d = dayjs();
-    return [d.startOf("day"), d.endOf("day")];
-  }, []);
-
   const { data: mfrPayload, loading: mfrLoading } = useRequest(async () => {
     const res = await fetch("/api/manufacturers/options");
     if (!res.ok) throw new Error("加载厂家失败");
@@ -178,6 +218,132 @@ export default function ProductsPage() {
   });
 
   const manufacturerOptions = mfrPayload?.data;
+
+  const newProductColumns = useMemo<ProFormColumnsType<NewProductFormValues>[]>(
+    () => [
+      {
+        valueType: "group",
+        label: "厂家",
+        colProps: { span: 24 },
+        columns: [
+          {
+            title: "已有厂家",
+            dataIndex: "manufacturerId",
+            valueType: "select",
+            colProps: { xs: 24, md: 12 },
+            fieldProps: {
+              loading: mfrLoading,
+              showSearch: true,
+              optionFilterProp: "label",
+              allowClear: true,
+              placeholder: "不选（改用右侧新建）",
+              options: manufacturerOptions ?? [],
+            },
+          },
+          {
+            title: "新厂家名称",
+            dataIndex: "newManufacturerName",
+            valueType: "text",
+            colProps: { xs: 24, md: 12 },
+            fieldProps: { placeholder: "填写则优先创建并选用" },
+          },
+        ],
+      },
+      {
+        valueType: "group",
+        label: "基本信息",
+        colProps: { span: 24 },
+        columns: [
+          {
+            title: "入库登记名称",
+            dataIndex: "nameInbound",
+            valueType: "text",
+            colProps: { span: 24 },
+            formItemProps: { rules: [{ required: true, message: "请输入入库登记名称" }] },
+          },
+          {
+            title: "厂家发货名称",
+            dataIndex: "nameManufacturer",
+            valueType: "text",
+            colProps: { span: 24 },
+            formItemProps: { rules: [{ required: true, message: "请输入厂家发货名称" }] },
+          },
+          {
+            title: "成本价",
+            dataIndex: "costPrice",
+            valueType: "text",
+            colProps: { xs: 24, sm: 8 },
+            fieldProps: { placeholder: "可选", inputMode: "decimal" },
+          },
+          {
+            title: "批发价",
+            dataIndex: "wholesalePrice",
+            valueType: "text",
+            colProps: { xs: 24, sm: 8 },
+            fieldProps: { placeholder: "可选", inputMode: "decimal" },
+          },
+          {
+            title: "零售价",
+            dataIndex: "retailPrice",
+            valueType: "text",
+            colProps: { xs: 24, sm: 8 },
+            fieldProps: { placeholder: "可选", inputMode: "decimal" },
+          },
+          {
+            title: "材质",
+            dataIndex: "material",
+            valueType: "textarea",
+            colProps: { span: 24 },
+            fieldProps: { rows: 2, placeholder: "如：棉、麻、真丝，或自定义" },
+          },
+          {
+            title: "衣服照片（主图）",
+            dataIndex: "image",
+            valueType: "text",
+            colProps: { span: 24 },
+            formItemProps: {
+              valuePropName: "fileList",
+              getValueFromEvent: (e: { fileList?: UploadFile[] }) => e?.fileList ?? [],
+            },
+            renderFormItem: () => (
+              <Upload
+                maxCount={1}
+                accept="image/*"
+                beforeUpload={() => false}
+                listType="picture"
+              >
+                <Button>选择图片</Button>
+              </Upload>
+            ),
+          },
+        ],
+      },
+      {
+        valueType: "formList",
+        dataIndex: "skus",
+        label: "颜色与尺码（SKU）",
+        colProps: { span: 24 },
+        initialValue: [{ color: "", size: "" }],
+        fieldProps: {
+          min: 1,
+          creatorButtonProps: { creatorButtonText: "添加一行" },
+        },
+        columns: [
+          {
+            title: "颜色",
+            dataIndex: "color",
+            valueType: "text",
+          },
+          {
+            title: "尺码",
+            dataIndex: "size",
+            valueType: "text",
+          },
+        ],
+      },
+    ],
+    [manufacturerOptions, mfrLoading],
+  );
 
   const columns = useMemo<ProColumns<ProductTableRow>[]>(
     () => [
@@ -398,38 +564,28 @@ export default function ProductsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">衣服档案</h1>
-          <p className="mt-1 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
-            维护款名、厂家与 SKU。下表汇总该款在所有 SKU 上的
-            <strong className="font-medium text-zinc-800 dark:text-zinc-200">订货 / 厂家发货 / 入库</strong>
-            件数（与「统计 / 对货」口径一致）。
-            <span className="mt-1 block">
-              点击<strong className="font-medium text-zinc-800 dark:text-zinc-200">蓝色数字</strong>
-              可打开对应模块列表（已按该款筛选）；点击
-              <strong className="font-medium text-zinc-800 dark:text-zinc-200">欠发</strong>
-              进入档案内的对货明细（订货 − 发货）。
-            </span>
-          </p>
-        </div>
-        <Link
-          href="/products/new"
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
-          新建档案
-        </Link>
+      <div>
+        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">衣服档案</h1>
+        <p className="mt-1 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
+          维护款名、厂家与 SKU。下表汇总该款在所有 SKU 上的
+          <strong className="font-medium text-zinc-800 dark:text-zinc-200">订货 / 厂家发货 / 入库</strong>
+          件数（与「统计 / 对货」口径一致）。
+          <span className="mt-1 block">
+            点击<strong className="font-medium text-zinc-800 dark:text-zinc-200">蓝色数字</strong>
+            可打开对应模块列表（已按该款筛选）；点击
+            <strong className="font-medium text-zinc-800 dark:text-zinc-200">欠发</strong>
+            进入档案内的对货明细（订货 − 发货）。
+          </span>
+        </p>
       </div>
 
       <div className="products-pro-table-wrap overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
         <ProTable<ProductTableRow>
+          actionRef={actionRef}
           columns={columns}
           rowKey="id"
           formRef={searchFormRef}
           form={{
-            initialValues: {
-              inboundDateRange: inboundDateDefault,
-            },
             onValuesChange: (changed) => {
               const keys = Object.keys(changed ?? {});
               const immediate =
@@ -483,9 +639,67 @@ export default function ProductsPage() {
           tableLayout="fixed"
           ghost
           dateFormatter="string"
-          toolBarRender={false}
+          toolBarRender={() => [
+            <Link
+              key="inbound"
+              href="/inbound"
+              className="inline-flex items-center text-sm font-medium text-zinc-700 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-300 dark:hover:text-zinc-100"
+            >
+              登记入库
+            </Link>,
+            <Link
+              key="shipments"
+              href="/shipments"
+              className="inline-flex items-center text-sm font-medium text-zinc-700 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-300 dark:hover:text-zinc-100"
+            >
+              登记发货
+            </Link>,
+            <Button
+              key="new-product"
+              type="primary"
+              size="small"
+              onClick={() => setNewProductOpen(true)}
+            >
+              新建档案
+            </Button>,
+          ]}
         />
       </div>
+
+      <BetaSchemaForm<NewProductFormValues>
+        layoutType="DrawerForm"
+        title="新建衣服档案"
+        description="保存后系统会在内部生成唯一编号。主图会写入服务器 storage/photos。"
+        open={newProductOpen}
+        onOpenChange={setNewProductOpen}
+        width={640}
+        grid
+        rowProps={{ gutter: [16, 8] }}
+        layout="inline"
+        labelCol={{ flex: "0 0 112px" }}
+        wrapperCol={{ flex: "1 1 auto" }}
+        labelAlign="right"
+        drawerProps={{ destroyOnClose: true }}
+        columns={newProductColumns}
+        initialValues={{
+          skus: [{ color: "", size: "" }],
+        }}
+        submitter={{
+          searchConfig: { submitText: "保存档案", resetText: "取消" },
+          resetButtonProps: { onClick: () => setNewProductOpen(false) },
+        }}
+        onFinish={async (values) => {
+          const fd = newProductValuesToFormData(values);
+          const r = await createProductInline(fd);
+          if (r?.error) {
+            message.error(r.error);
+            return false;
+          }
+          message.success("已保存档案");
+          actionRef.current?.reload?.();
+          return true;
+        }}
+      />
     </div>
   );
 }

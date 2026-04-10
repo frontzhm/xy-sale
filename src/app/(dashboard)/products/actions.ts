@@ -87,10 +87,7 @@ function normalizeSkuPayloads(
   return { ok: true, normalized };
 }
 
-export async function createProduct(
-  _prev: ProductFormState,
-  formData: FormData
-): Promise<ProductFormState> {
+async function createProductCore(formData: FormData): Promise<ProductFormState> {
   const nameInbound = String(formData.get("nameInbound") ?? "").trim();
   const nameManufacturer = String(formData.get("nameManufacturer") ?? "").trim();
   const materialRaw = String(formData.get("material") ?? "").trim();
@@ -181,6 +178,23 @@ export async function createProduct(
     return { error: "保存时与已有档案冲突，请重试。" };
   }
 
+  return null;
+}
+
+/** 列表页抽屉等场景：保存后不 redirect，仅刷新数据 */
+export async function createProductInline(formData: FormData): Promise<ProductFormState> {
+  const r = await createProductCore(formData);
+  if (r) return r;
+  revalidatePath("/products");
+  return null;
+}
+
+export async function createProduct(
+  _prev: ProductFormState,
+  formData: FormData
+): Promise<ProductFormState> {
+  const r = await createProductCore(formData);
+  if (r) return r;
   revalidatePath("/products");
   redirect("/products");
 }

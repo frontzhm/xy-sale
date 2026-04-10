@@ -8,7 +8,8 @@
   "packageManager": "pnpm@10.6.5",
   "scripts": {
     "predev": "prisma generate",
-    "dev": "next dev",
+    "dev": "NODE_OPTIONS=--max-old-space-size=6144 next dev --webpack",
+    "dev:turbo": "NODE_OPTIONS=--max-old-space-size=6144 next dev --turbopack",
     "prebuild": "prisma generate",
     "build": "next build",
     "start": "next start",
