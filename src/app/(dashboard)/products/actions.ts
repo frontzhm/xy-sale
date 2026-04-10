@@ -106,8 +106,8 @@ async function createProductCore(formData: FormData): Promise<ProductFormState> 
     return { error: "请选择已有厂家，或填写新厂家名称。" };
   }
 
-  if (!nameInbound || !nameManufacturer) {
-    return { error: "请填写入库名称、厂家发货名称。" };
+  if (!nameInbound) {
+    return { error: "请填写入库登记名称。" };
   }
 
   const skusParsed = parseSkusJson(String(formData.get("skusJson") ?? "[]"));
@@ -234,8 +234,8 @@ export async function updateProduct(
     return { error: "请选择已有厂家，或填写新厂家名称。" };
   }
 
-  if (!nameInbound || !nameManufacturer) {
-    return { error: "请填写入库名称、厂家发货名称。" };
+  if (!nameInbound) {
+    return { error: "请填写入库登记名称。" };
   }
 
   const skusParsed = parseSkusJson(String(formData.get("skusJson") ?? "[]"));

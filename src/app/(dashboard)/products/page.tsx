@@ -34,6 +34,9 @@ type NewProductFormValues = {
   skus?: { color?: string; size?: string }[];
 };
 
+/** 新建档案 SKU 默认行；「-」会原样写入 skusJson 提交后端，供后续能力使用 */
+const NEW_PRODUCT_SKU_DEFAULT_ROW = { color: "-", size: "-" } as const;
+
 function newProductValuesToFormData(values: NewProductFormValues): FormData {
   const fd = new FormData();
   fd.set("nameInbound", String(values.nameInbound ?? "").trim());
@@ -50,7 +53,8 @@ function newProductValuesToFormData(values: NewProductFormValues): FormData {
       color: String(r?.color ?? "").trim(),
       size: String(r?.size ?? "").trim(),
     }))
-    .filter((r) => r.color && r.size);
+    // 保留「-」占位；仅剔除整行都未填的情况
+    .filter((r) => r.color.length > 0 && r.size.length > 0);
   fd.set("skusJson", JSON.stringify(skus));
   const f = values.image?.[0]?.originFileObj;
   if (f) fd.set("image", f);
@@ -266,28 +270,43 @@ export default function ProductsPage() {
             dataIndex: "nameManufacturer",
             valueType: "text",
             colProps: { span: 24 },
-            formItemProps: { rules: [{ required: true, message: "请输入厂家发货名称" }] },
+            fieldProps: { placeholder: "可选" },
           },
           {
             title: "成本价",
             dataIndex: "costPrice",
             valueType: "text",
             colProps: { xs: 24, sm: 8 },
-            fieldProps: { placeholder: "可选", inputMode: "decimal" },
+            formItemProps: { className: "mb-0 max-sm:mb-2" },
+            fieldProps: {
+              placeholder: "可选",
+              inputMode: "decimal",
+              style: { width: 96 },
+            },
           },
           {
             title: "批发价",
             dataIndex: "wholesalePrice",
             valueType: "text",
             colProps: { xs: 24, sm: 8 },
-            fieldProps: { placeholder: "可选", inputMode: "decimal" },
+            formItemProps: { className: "mb-0 max-sm:mb-2" },
+            fieldProps: {
+              placeholder: "可选",
+              inputMode: "decimal",
+              style: { width: 96 },
+            },
           },
           {
             title: "零售价",
             dataIndex: "retailPrice",
             valueType: "text",
             colProps: { xs: 24, sm: 8 },
-            fieldProps: { placeholder: "可选", inputMode: "decimal" },
+            formItemProps: { className: "mb-0 max-sm:mb-2" },
+            fieldProps: {
+              placeholder: "可选",
+              inputMode: "decimal",
+              style: { width: 96 },
+            },
           },
           {
             title: "材质",
@@ -323,10 +342,11 @@ export default function ProductsPage() {
         dataIndex: "skus",
         label: "颜色与尺码（SKU）",
         colProps: { span: 24 },
-        initialValue: [{ color: "", size: "" }],
+        initialValue: [{ ...NEW_PRODUCT_SKU_DEFAULT_ROW }],
         fieldProps: {
           min: 1,
           creatorButtonProps: { creatorButtonText: "添加一行" },
+          creatorRecord: { ...NEW_PRODUCT_SKU_DEFAULT_ROW },
         },
         columns: [
           {
@@ -579,7 +599,7 @@ export default function ProductsPage() {
         </p>
       </div>
 
-      <div className="products-pro-table-wrap overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="products-pro-table-wrap overflow-x-auto rounded-lg  bg-white dark:border-zinc-800 dark:bg-zinc-950">
         <ProTable<ProductTableRow>
           actionRef={actionRef}
           columns={columns}
@@ -675,14 +695,14 @@ export default function ProductsPage() {
         width={640}
         grid
         rowProps={{ gutter: [16, 8] }}
-        layout="inline"
+        layout="horizontal"
         labelCol={{ flex: "0 0 112px" }}
         wrapperCol={{ flex: "1 1 auto" }}
         labelAlign="right"
         drawerProps={{ destroyOnClose: true }}
         columns={newProductColumns}
         initialValues={{
-          skus: [{ color: "", size: "" }],
+          skus: [{ ...NEW_PRODUCT_SKU_DEFAULT_ROW }],
         }}
         submitter={{
           searchConfig: { submitText: "保存档案", resetText: "取消" },

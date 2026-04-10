@@ -130,13 +130,11 @@ export function ProductForm({ manufacturers, mode, productId, initial }: Product
             />
           </label>
           <label className="block text-sm sm:col-span-2">
-            <span className="text-zinc-700 dark:text-zinc-300">
-              厂家发货名称 <span className="text-red-600">*</span>
-            </span>
+            <span className="text-zinc-700 dark:text-zinc-300">厂家发货名称</span>
             <input
               name="nameManufacturer"
-              required
               type="text"
+              placeholder="可选"
               defaultValue={initial?.nameManufacturer}
               className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
             />
