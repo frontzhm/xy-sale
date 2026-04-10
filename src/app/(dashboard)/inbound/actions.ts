@@ -36,10 +36,7 @@ function parseLinesJson(raw: string): { ok: true; lines: LinePayload[] } | { ok:
   }
 }
 
-export async function createInbound(
-  _prev: InboundFormState,
-  formData: FormData
-): Promise<InboundFormState> {
+async function createInboundCore(formData: FormData): Promise<InboundFormState> {
   const noteRaw = String(formData.get("note") ?? "").trim();
   const note = noteRaw === "" ? null : noteRaw;
 
@@ -96,6 +93,23 @@ export async function createInbound(
     return { error: "保存失败，请稍后重试。" };
   }
 
+  return null;
+}
+
+/** 列表页抽屉等：保存后不 redirect */
+export async function createInboundInline(formData: FormData): Promise<InboundFormState> {
+  const r = await createInboundCore(formData);
+  if (r) return r;
+  revalidatePath("/inbound");
+  return null;
+}
+
+export async function createInbound(
+  _prev: InboundFormState,
+  formData: FormData
+): Promise<InboundFormState> {
+  const r = await createInboundCore(formData);
+  if (r) return r;
   revalidatePath("/inbound");
   redirect("/inbound");
 }
