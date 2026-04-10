@@ -1,15 +1,52 @@
 "use client";
 
 import { ProTable } from "@ant-design/pro-components";
-import type { ProColumns } from "@ant-design/pro-components";
-import { useRequest } from "ahooks";
+import type { ProColumns, ProFormInstance } from "@ant-design/pro-components";
+import { useDebounceFn, useRequest } from "ahooks";
 import { Space } from "antd";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
+import isoWeek from "dayjs/plugin/isoWeek";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 
 import { photoPublicUrl } from "@/lib/storage/photo-url";
+
+dayjs.extend(isoWeek);
+
+/** 入库日期 RangePicker 快捷项（value 用函数，点击时取当前时间） */
+const INBOUND_DATE_RANGE_PRESETS: {
+  label: string;
+  value: () => [Dayjs, Dayjs];
+}[] = [
+  {
+    label: "今天",
+    value: () => [dayjs().startOf("day"), dayjs().endOf("day")],
+  },
+  {
+    label: "昨天",
+    value: () => {
+      const y = dayjs().subtract(1, "day");
+      return [y.startOf("day"), y.endOf("day")];
+    },
+  },
+  {
+    label: "本周",
+    value: () => [dayjs().startOf("isoWeek"), dayjs().endOf("day")],
+  },
+  {
+    label: "本月",
+    value: () => [dayjs().startOf("month"), dayjs().endOf("month")],
+  },
+  {
+    label: "近一周",
+    value: () => [dayjs().subtract(6, "day").startOf("day"), dayjs().endOf("day")],
+  },
+  {
+    label: "近一个月",
+    value: () => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")],
+  },
+];
 
 type ProductTableRow = {
   id: string;
@@ -119,6 +156,16 @@ type TableRequestVars = {
 };
 
 export default function ProductsPage() {
+  const searchFormRef = useRef<ProFormInstance>(undefined);
+
+  /** ProTable 请求参数来自「查询提交」后的 formSearch；直接 reload 不会带上未提交的表单，必须用 submit 同步 */
+  const { run: scheduleSubmitSearch, cancel: cancelDebouncedSubmit } = useDebounceFn(
+    () => {
+      void searchFormRef.current?.submit?.();
+    },
+    { wait: 320 },
+  );
+
   const inboundDateDefault = useMemo((): [Dayjs, Dayjs] => {
     const d = dayjs();
     return [d.startOf("day"), d.endOf("day")];
@@ -169,6 +216,7 @@ export default function ProductsPage() {
         fieldProps: {
           allowClear: true,
           placeholder: ["开始日期", "结束日期"],
+          presets: INBOUND_DATE_RANGE_PRESETS,
         },
       },
       {
@@ -377,9 +425,21 @@ export default function ProductsPage() {
         <ProTable<ProductTableRow>
           columns={columns}
           rowKey="id"
+          formRef={searchFormRef}
           form={{
             initialValues: {
               inboundDateRange: inboundDateDefault,
+            },
+            onValuesChange: (changed) => {
+              const keys = Object.keys(changed ?? {});
+              const immediate =
+                keys.includes("inboundDateRange") || keys.includes("manufacturerId");
+              if (immediate) {
+                cancelDebouncedSubmit();
+                queueMicrotask(() => void searchFormRef.current?.submit?.());
+                return;
+              }
+              scheduleSubmitSearch();
             },
           }}
           request={async (params, sort) => {
