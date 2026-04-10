@@ -17,6 +17,11 @@ import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 
 import { createProductInline } from "./actions";
+import {
+  InboundRegistrationDrawer,
+  ShipmentRegistrationDrawer,
+  type MovementCatalogPayload,
+} from "./movement-registration-drawers";
 import { photoPublicUrl } from "@/lib/storage/photo-url";
 
 dayjs.extend(isoWeek);
@@ -204,8 +209,36 @@ type TableRequestVars = {
 
 export default function ProductsPage() {
   const [newProductOpen, setNewProductOpen] = useState(false);
+  const [movementCtx, setMovementCtx] = useState<MovementCatalogPayload | null>(null);
+  const [inboundDrawerOpen, setInboundDrawerOpen] = useState(false);
+  const [shipmentDrawerOpen, setShipmentDrawerOpen] = useState(false);
+  const [fetchingMovementKind, setFetchingMovementKind] = useState<"inbound" | "shipment" | null>(
+    null,
+  );
   const searchFormRef = useRef<ProFormInstance>(undefined);
   const actionRef = useRef<ActionType>(undefined);
+
+  async function openMovementDrawer(kind: "inbound" | "shipment") {
+    setFetchingMovementKind(kind);
+    try {
+      if (!movementCtx) {
+        const res = await fetch("/api/products/movement-catalog");
+        if (!res.ok) {
+          const t = await res.text().catch(() => "");
+          message.error(t || "加载登记数据失败");
+          return;
+        }
+        const j = (await res.json()) as MovementCatalogPayload;
+        setMovementCtx(j);
+      }
+      if (kind === "inbound") setInboundDrawerOpen(true);
+      else setShipmentDrawerOpen(true);
+    } catch {
+      message.error("加载登记数据失败，请稍后重试");
+    } finally {
+      setFetchingMovementKind(null);
+    }
+  }
 
   /** ProTable 请求参数来自「查询提交」后的 formSearch；直接 reload 不会带上未提交的表单，必须用 submit 同步 */
   const { run: scheduleSubmitSearch, cancel: cancelDebouncedSubmit } = useDebounceFn(
@@ -660,20 +693,26 @@ export default function ProductsPage() {
           ghost
           dateFormatter="string"
           toolBarRender={() => [
-            <Link
+            <Button
               key="inbound"
-              href="/inbound"
-              className="inline-flex items-center text-sm font-medium text-zinc-700 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-300 dark:hover:text-zinc-100"
+              type="link"
+              size="small"
+              className="inline-flex h-auto items-center p-0 text-sm font-medium text-zinc-700 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-300 dark:hover:text-zinc-100"
+              loading={fetchingMovementKind === "inbound"}
+              onClick={() => void openMovementDrawer("inbound")}
             >
               登记入库
-            </Link>,
-            <Link
+            </Button>,
+            <Button
               key="shipments"
-              href="/shipments"
-              className="inline-flex items-center text-sm font-medium text-zinc-700 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-300 dark:hover:text-zinc-100"
+              type="link"
+              size="small"
+              className="inline-flex h-auto items-center p-0 text-sm font-medium text-zinc-700 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-300 dark:hover:text-zinc-100"
+              loading={fetchingMovementKind === "shipment"}
+              onClick={() => void openMovementDrawer("shipment")}
             >
               登记发货
-            </Link>,
+            </Button>,
             <Button
               key="new-product"
               type="primary"
@@ -692,14 +731,13 @@ export default function ProductsPage() {
         description="保存后系统会在内部生成唯一编号。主图会写入服务器 storage/photos。"
         open={newProductOpen}
         onOpenChange={setNewProductOpen}
-        width={640}
         grid
         rowProps={{ gutter: [16, 8] }}
         layout="horizontal"
         labelCol={{ flex: "0 0 112px" }}
         wrapperCol={{ flex: "1 1 auto" }}
         labelAlign="right"
-        drawerProps={{ destroyOnClose: true }}
+        drawerProps={{ destroyOnClose: true, size: 640 }}
         columns={newProductColumns}
         initialValues={{
           skus: [{ ...NEW_PRODUCT_SKU_DEFAULT_ROW }],
@@ -717,7 +755,28 @@ export default function ProductsPage() {
           }
           message.success("已保存档案");
           actionRef.current?.reload?.();
+          setMovementCtx(null);
           return true;
+        }}
+      />
+
+      <InboundRegistrationDrawer
+        open={inboundDrawerOpen}
+        onOpenChange={setInboundDrawerOpen}
+        catalog={movementCtx?.catalog ?? []}
+        onAfterSubmit={() => {
+          actionRef.current?.reload?.();
+          setMovementCtx(null);
+        }}
+      />
+      <ShipmentRegistrationDrawer
+        open={shipmentDrawerOpen}
+        onOpenChange={setShipmentDrawerOpen}
+        catalog={movementCtx?.catalog ?? []}
+        manufacturers={movementCtx?.manufacturers ?? []}
+        onAfterSubmit={() => {
+          actionRef.current?.reload?.();
+          setMovementCtx(null);
         }}
       />
     </div>

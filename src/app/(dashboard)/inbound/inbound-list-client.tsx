@@ -370,14 +370,13 @@ export function InboundListPageClient({ catalog, initialQ, initialProductId }: P
         description="上传入库群里的照片并填写本次收到的 SKU 与件数；照片会保存到服务器存档。"
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
-        width={720}
         grid
         rowProps={{ gutter: [16, 8] }}
         layout="horizontal"
         labelCol={{ flex: "0 0 112px" }}
         wrapperCol={{ flex: "1 1 auto" }}
         labelAlign="right"
-        drawerProps={{ destroyOnClose: true }}
+        drawerProps={{ destroyOnClose: true, size: 720 }}
         columns={drawerColumns}
         initialValues={{
           lines: [{}],

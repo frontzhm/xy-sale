@@ -357,14 +357,13 @@ export function OrderListPageClient({
         description="选择订货厂家后，仅显示该厂家名下的衣服与 SKU；保存后参与统计页「订货 / 欠发」计算。"
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
-        width={720}
         grid
         rowProps={{ gutter: [16, 8] }}
         layout="horizontal"
         labelCol={{ flex: "0 0 112px" }}
         wrapperCol={{ flex: "1 1 auto" }}
         labelAlign="right"
-        drawerProps={{ destroyOnClose: true }}
+        drawerProps={{ destroyOnClose: true, size: 720 }}
         columns={drawerColumns}
         initialValues={{
           lines: [{}],
