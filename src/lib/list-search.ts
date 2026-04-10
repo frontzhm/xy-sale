@@ -33,6 +33,23 @@ export function productListWhereFromQ(q: string): Prisma.ProductWhereInput | und
   };
 }
 
+/** 衣服档案 ProTable：入库名模糊 + 厂家 id + 材质模糊（AND） */
+export function productListWhereFromTableFilters(input: {
+  nameInbound?: string | null | undefined;
+  manufacturerId?: string | null | undefined;
+  material?: string | null | undefined;
+}): Prisma.ProductWhereInput | undefined {
+  const parts: Prisma.ProductWhereInput[] = [];
+  const ni = trimSearchQ(input.nameInbound);
+  if (ni) parts.push({ nameInbound: { contains: ni } });
+  const mid = trimSearchQ(input.manufacturerId);
+  if (mid) parts.push({ manufacturerId: mid });
+  const mat = trimSearchQ(input.material);
+  if (mat) parts.push({ material: { contains: mat } });
+  if (parts.length === 0) return undefined;
+  return { AND: parts };
+}
+
 export async function orderListWhereFromQ(q: string): Promise<Prisma.OrderWhereInput | undefined> {
   const t = trimSearchQ(q);
   if (!t) return undefined;

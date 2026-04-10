@@ -5,6 +5,7 @@ import type { ProColumns } from "@ant-design/pro-components";
 import { useRequest } from "ahooks";
 import { Space } from "antd";
 import Link from "next/link";
+import { useMemo } from "react";
 
 import { photoPublicUrl } from "@/lib/storage/photo-url";
 
@@ -12,6 +13,7 @@ type ProductTableRow = {
   id: string;
   nameInbound: string;
   manufacturerName: string;
+  material: string | null;
   skuCount: number;
   ordered: number;
   shipped: number;
@@ -19,6 +21,23 @@ type ProductTableRow = {
   shortageVsShipped: number;
   imageFileName: string | null;
 };
+
+const MOVEMENT_SORT_KEYS = new Set([
+  "ordered",
+  "shipped",
+  "inbound",
+  "shortageVsShipped",
+]);
+
+function pickMovementSort(sort: unknown): { field: string; order: "asc" | "desc" } | null {
+  if (!sort || typeof sort !== "object") return null;
+  for (const [k, v] of Object.entries(sort as Record<string, unknown>)) {
+    if (!MOVEMENT_SORT_KEYS.has(k)) continue;
+    if (v === "ascend") return { field: k, order: "asc" };
+    if (v === "descend") return { field: k, order: "desc" };
+  }
+  return null;
+}
 
 function QtyLink({
   href,
@@ -47,145 +66,234 @@ function QtyLink({
   );
 }
 
-const columns: ProColumns<ProductTableRow>[] = [
-  {
-    title: "关键词",
-    dataIndex: "q",
-    hideInTable: true,
-    fieldProps: {
-      placeholder: "入库名、厂家发货名、厂家名称…",
-    },
-  },
-  {
-    title: "主图",
-    dataIndex: "imageFileName",
-    width: 88,
-    search: false,
-    render: (_, row) =>
-      row.imageFileName ? (
-        // eslint-disable-next-line @next/next/no-img-element -- 本地 API 动态地址
-        <img
-          src={photoPublicUrl(row.imageFileName)}
-          alt=""
-          className="h-12 w-12 rounded-md border border-zinc-200 object-cover dark:border-zinc-700"
-        />
-      ) : (
-        <span className="inline-flex h-12 w-12 items-center justify-center rounded-md border border-dashed border-zinc-300 text-xs text-zinc-400 dark:border-zinc-600">
-          无
-        </span>
-      ),
-  },
-  {
-    title: "入库名称",
-    dataIndex: "nameInbound",
-    ellipsis: true,
-    width: 160,
-    search: false,
-  },
-  {
-    title: "厂家",
-    dataIndex: "manufacturerName",
-    ellipsis: true,
-    width: 120,
-    search: false,
-  },
-  {
-    title: "SKU",
-    dataIndex: "skuCount",
-    width: 72,
-    align: "right",
-    search: false,
-  },
-  {
-    title: "订货",
-    dataIndex: "ordered",
-    width: 80,
-    align: "right",
-    search: false,
-    render: (_, row) => (
-      <QtyLink
-        href={`/orders?productId=${encodeURIComponent(row.id)}`}
-        value={row.ordered}
-        title="查看含该款的订货单"
-      />
-    ),
-  },
-  {
-    title: "发货",
-    dataIndex: "shipped",
-    width: 80,
-    align: "right",
-    search: false,
-    render: (_, row) => (
-      <QtyLink
-        href={`/shipments?productId=${encodeURIComponent(row.id)}`}
-        value={row.shipped}
-        title="查看含该款的厂家发货登记"
-      />
-    ),
-  },
-  {
-    title: "入库",
-    dataIndex: "inbound",
-    width: 80,
-    align: "right",
-    search: false,
-    render: (_, row) => (
-      <QtyLink
-        href={`/inbound?productId=${encodeURIComponent(row.id)}`}
-        value={row.inbound}
-        title="查看含该款的入库登记"
-      />
-    ),
-  },
-  {
-    title: "欠发",
-    dataIndex: "shortageVsShipped",
-    width: 80,
-    align: "right",
-    search: false,
-    render: (_, row) => (
-      <QtyLink
-        href={`/products/${row.id}#product-reconciliation`}
-        value={row.shortageVsShipped}
-        warnNegative
-        title="欠发 = 订货 − 发货；查看该款对货汇总与各 SKU"
-      />
-    ),
-  },
-  {
-    title: "操作",
-    valueType: "option",
-    width: 120,
-    fixed: "right",
-    search: false,
-    render: (_, row) => (
-      <Space size="middle" wrap>
-        <Link
-          href={`/products/${row.id}`}
-          className="text-sm font-medium text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300"
-        >
-          查看
-        </Link>
-        <Link
-          href={`/products/${row.id}/edit`}
-          className="text-sm font-medium text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300"
-        >
-          编辑
-        </Link>
-      </Space>
-    ),
-  },
-];
+/** 备注：入库/发货对比 + 订货侧欠发或「少于发货」；订货为 0 时不提示欠发类文案 */
+function productRemarkParts(row: ProductTableRow): string[] {
+  const parts: string[] = [];
+  if (row.inbound > row.shipped) parts.push("入库大于发货");
+  if (row.inbound < row.shipped) parts.push("入库少于发货");
+  if (row.ordered > 0) {
+    if (row.shortageVsShipped > 0) parts.push(`欠发 ${row.shortageVsShipped}`);
+    if (row.shortageVsShipped < 0) parts.push("订货少于发货");
+  }
+  return parts;
+}
+
+function RemarkCell({ row }: { row: ProductTableRow }) {
+  const parts = productRemarkParts(row);
+  if (parts.length === 0) {
+    return <span className="text-zinc-400">—</span>;
+  }
+  return (
+    <span className="text-xs leading-snug text-amber-900 dark:text-amber-100/90">{parts.join("；")}</span>
+  );
+}
+
+type TableRequestVars = {
+  current?: number;
+  pageSize?: number;
+  searchNameInbound?: string;
+  manufacturerId?: string;
+  searchMaterial?: string;
+  sortField?: string;
+  sortOrder?: "asc" | "desc";
+};
 
 export default function ProductsPage() {
+  const { data: mfrPayload, loading: mfrLoading } = useRequest(async () => {
+    const res = await fetch("/api/manufacturers/options");
+    if (!res.ok) throw new Error("加载厂家失败");
+    return res.json() as Promise<{ data: { label: string; value: string }[] }>;
+  });
+
+  const manufacturerOptions = mfrPayload?.data;
+
+  const columns = useMemo<ProColumns<ProductTableRow>[]>(
+    () => [
+      {
+        title: "入库名称",
+        dataIndex: "searchNameInbound",
+        hideInTable: true,
+        fieldProps: { placeholder: "模糊匹配入库登记名称" },
+      },
+      {
+        title: "厂家名称",
+        dataIndex: "manufacturerId",
+        hideInTable: true,
+        valueType: "select",
+        fieldProps: {
+          loading: mfrLoading,
+          showSearch: true,
+          optionFilterProp: "label",
+          allowClear: true,
+          placeholder: "选择厂家（可搜索）",
+          options: manufacturerOptions ?? [],
+        },
+      },
+      {
+        title: "材质",
+        dataIndex: "searchMaterial",
+        hideInTable: true,
+        fieldProps: { placeholder: "模糊匹配材质" },
+      },
+      {
+        title: "主图",
+        dataIndex: "imageFileName",
+        width: 88,
+        search: false,
+        render: (_, row) =>
+          row.imageFileName ? (
+            // eslint-disable-next-line @next/next/no-img-element -- 本地 API 动态地址
+            <img
+              src={photoPublicUrl(row.imageFileName)}
+              alt=""
+              className="h-12 w-12 rounded-md border border-zinc-200 object-cover dark:border-zinc-700"
+            />
+          ) : (
+            <span className="inline-flex h-12 w-12 items-center justify-center rounded-md border border-dashed border-zinc-300 text-xs text-zinc-400 dark:border-zinc-600">
+              无
+            </span>
+          ),
+      },
+      {
+        title: "入库名称",
+        dataIndex: "nameInbound",
+        ellipsis: true,
+        width: 160,
+        search: false,
+      },
+      {
+        title: "厂家",
+        dataIndex: "manufacturerName",
+        ellipsis: true,
+        width: 120,
+        search: false,
+      },
+      // {
+      //   title: "材质",
+      //   dataIndex: "material",
+      //   ellipsis: true,
+      //   width: 88,
+      //   search: false,
+      //   render: (_, row) => row.material ?? "—",
+      // },
+      // {
+      //   title: "SKU",
+      //   dataIndex: "skuCount",
+      //   width: 72,
+      //   align: "right",
+      //   search: false,
+      // },
+      {
+        title: "订货",
+        dataIndex: "ordered",
+        width: 60,
+        align: "right",
+        search: false,
+        sorter: true,
+        render: (_, row) => (
+          <QtyLink
+            href={`/orders?productId=${encodeURIComponent(row.id)}`}
+            value={row.ordered}
+            title="查看含该款的订货单"
+          />
+        ),
+      },
+      {
+        title: "发货",
+        dataIndex: "shipped",
+        width: 60,
+        align: "right",
+        search: false,
+        sorter: true,
+        render: (_, row) => (
+          <QtyLink
+            href={`/shipments?productId=${encodeURIComponent(row.id)}`}
+            value={row.shipped}
+            title="查看含该款的厂家发货登记"
+          />
+        ),
+      },
+      {
+        title: "入库",
+        dataIndex: "inbound",
+        width: 60,
+        align: "right",
+        search: false,
+        sorter: true,
+        render: (_, row) => (
+          <QtyLink
+            href={`/inbound?productId=${encodeURIComponent(row.id)}`}
+            value={row.inbound}
+            title="查看含该款的入库登记"
+          />
+        ),
+      },
+      {
+        title: "欠发",
+        dataIndex: "shortageVsShipped",
+        width: 60,
+        align: "right",
+        search: false,
+        sorter: true,
+        render: (_, row) => (
+          <QtyLink
+            href={`/products/${row.id}#product-reconciliation`}
+            value={row.shortageVsShipped}
+            warnNegative
+            title="欠发 = 订货 − 发货；查看该款对货汇总与各 SKU"
+          />
+        ),
+      },
+      {
+        title: "备注",
+        dataIndex: "remark",
+        width: 200,
+        ellipsis: true,
+        search: false,
+        render: (_, row) => <RemarkCell row={row} />,
+      },
+      {
+        title: "操作",
+        valueType: "option",
+        width: 120,
+        fixed: "right",
+        search: false,
+        render: (_, row) => (
+          <Space size="middle" wrap>
+            <Link
+              href={`/products/${row.id}`}
+              className="text-sm font-medium text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300"
+            >
+              查看
+            </Link>
+            <Link
+              href={`/products/${row.id}/edit`}
+              className="text-sm font-medium text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300"
+            >
+              编辑
+            </Link>
+          </Space>
+        ),
+      },
+    ],
+    [manufacturerOptions, mfrLoading],
+  );
+
   const { runAsync } = useRequest(
-    async (vars: { current?: number; pageSize?: number; q?: string }) => {
+    async (vars: TableRequestVars) => {
       const sp = new URLSearchParams();
       sp.set("current", String(vars.current ?? 1));
       sp.set("pageSize", String(vars.pageSize ?? 20));
-      const q = vars.q?.trim();
-      if (q) sp.set("q", q);
+      const sni = vars.searchNameInbound?.trim();
+      if (sni) sp.set("nameInbound", sni);
+      const mid = vars.manufacturerId?.trim();
+      if (mid) sp.set("manufacturerId", mid);
+      const smt = vars.searchMaterial?.trim();
+      if (smt) sp.set("material", smt);
+      if (vars.sortField) {
+        sp.set("sortField", vars.sortField);
+        sp.set("sortOrder", vars.sortOrder ?? "desc");
+      }
       const res = await fetch(`/api/products/table?${sp.toString()}`);
       if (!res.ok) {
         const text = await res.text();
@@ -229,11 +337,21 @@ export default function ProductsPage() {
         <ProTable<ProductTableRow>
           columns={columns}
           rowKey="id"
-          request={async (params) => {
+          request={async (params, sort) => {
+            const sm = pickMovementSort(sort);
             const r = await runAsync({
               current: params.current,
               pageSize: params.pageSize,
-              q: typeof params.q === "string" ? params.q : undefined,
+              searchNameInbound:
+                typeof params.searchNameInbound === "string" ? params.searchNameInbound : undefined,
+              manufacturerId:
+                params.manufacturerId != null && params.manufacturerId !== ""
+                  ? String(params.manufacturerId)
+                  : undefined,
+              searchMaterial:
+                typeof params.searchMaterial === "string" ? params.searchMaterial : undefined,
+              sortField: sm?.field,
+              sortOrder: sm?.order,
             });
             return {
               data: r.data,
@@ -252,7 +370,7 @@ export default function ProductsPage() {
             showSizeChanger: true,
             showTotal: (total) => `共 ${total} 条`,
           }}
-          scroll={{ x: 1080 }}
+          // scroll={{ x: 1380 }}
           size="small"
           tableLayout="fixed"
           ghost
