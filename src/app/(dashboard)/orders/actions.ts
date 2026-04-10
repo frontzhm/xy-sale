@@ -60,10 +60,7 @@ function parseLinesJson(raw: string): { ok: true; lines: LinePayload[] } | { ok:
   }
 }
 
-export async function createOrder(
-  _prev: OrderFormState,
-  formData: FormData
-): Promise<OrderFormState> {
+async function createOrderCore(formData: FormData): Promise<OrderFormState> {
   const manufacturerId = String(formData.get("manufacturerId") ?? "").trim();
   if (!manufacturerId) {
     return { error: "请选择订货厂家。" };
@@ -102,6 +99,23 @@ export async function createOrder(
     return { error: "保存失败，请稍后重试。" };
   }
 
+  return null;
+}
+
+export async function createOrderInline(formData: FormData): Promise<OrderFormState> {
+  const r = await createOrderCore(formData);
+  if (r) return r;
+  revalidatePath("/orders");
+  revalidatePath("/reports");
+  return null;
+}
+
+export async function createOrder(
+  _prev: OrderFormState,
+  formData: FormData
+): Promise<OrderFormState> {
+  const r = await createOrderCore(formData);
+  if (r) return r;
   revalidatePath("/orders");
   revalidatePath("/reports");
   redirect("/orders");

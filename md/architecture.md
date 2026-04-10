@@ -39,9 +39,9 @@ xy-sale/
 |------|------|
 | `/` | 概览 |
 | `/products`、`/products/new`、`/products/[id]`、`/products/[id]/edit` | 衣服档案（Product + SKU） |
-| `/orders`、… | 订货单 |
-| `/shipments`、… | 厂家发货登记 |
-| `/inbound`、… | 入库登记 |
+| `/orders`、… | 订货单（列表为 `ProTable`，`GET /api/orders/table`） |
+| `/shipments`、… | 厂家发货登记（列表为 `ProTable`，`GET /api/shipments/table`） |
+| `/inbound`、… | 入库登记（同上，`GET /api/inbound/table`） |
 | `/reports` | 统计 / 对货 |
 
 动态路由使用 Next 约定：**`params` 为 Promise**，在页面中需 `await params`。
@@ -49,7 +49,7 @@ xy-sale/
 **列表筛选**：
 
 - **`?productId=<衣服档案 id>`**：订货、厂家发货、入库列表可按款筛选（从衣服档案点击件数进入）。解析见 `lib/products/list-filter.ts`，提示条见 `components/product-list-filter-banner.tsx`。
-- **`?q=`**：衣服档案、订货、发货、入库、统计对货等表格页支持关键词搜索（GET 表单，可与其他参数并存）。Prisma 条件在 `lib/list-search.ts`，搜索框见 `components/table-search-bar.tsx`。
+- **`?q=`**：衣服档案、订货、发货、入库、统计对货等支持关键词搜索；订货/发货/入库列表在 **`ProTable`** 内搜索并请求对应 **`/api/.../table`**。Prisma 条件在 `lib/list-search.ts`；部分旧页仍用 `components/table-search-bar.tsx` 的 GET 表单。
 
 ## `src/lib` 模块
 
@@ -66,11 +66,11 @@ xy-sale/
 表单提交以 **Server Actions**（`"use server"`）为主，各模块 `actions.ts`：
 
 - `products/actions.ts`：衣服与 SKU、图片
-- `orders/actions.ts`：订货单；校验厂家与 SKU 归属
-- `shipments/actions.ts`：发货登记与照片
-- `inbound/actions.ts`：入库登记
+- `orders/actions.ts`：订货单；校验厂家与 SKU 归属（含 `createOrderInline`，供列表抽屉保存后不整页跳转）
+- `shipments/actions.ts`：发货登记与照片（含 `createShipmentInline`，供列表抽屉保存后不整页跳转）
+- `inbound/actions.ts`：入库登记（含 `createInboundInline`）
 
-常见模式：`useActionState`、隐藏字段传 `linesJson`、`revalidatePath`、`redirect`。
+常见模式：`useActionState`、隐藏字段传 `linesJson`、`revalidatePath`、`redirect`；列表抽屉内保存用 `*Inline` + 仅 `revalidatePath`。
 
 ## HTTP API Routes
 
@@ -78,6 +78,10 @@ xy-sale/
 |------|------|
 | `app/api/photos/[name]/route.ts` | `GET`：从 `storage/photos` 读照片 |
 | `app/api/upload/route.ts` | 上传相关（见实现） |
+| `app/api/products/table/route.ts` | `GET`：衣服档案 `ProTable` 分页与筛选 |
+| `app/api/inbound/table/route.ts` | `GET`：入库列表 `ProTable` 分页与 `filterMeta` |
+| `app/api/orders/table/route.ts` | `GET`：订货列表 `ProTable` 分页与 `filterMeta` |
+| `app/api/shipments/table/route.ts` | `GET`：厂家发货列表 `ProTable` 分页与 `filterMeta` |
 
 ## 构建与数据库脚本
 

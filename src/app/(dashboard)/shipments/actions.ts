@@ -36,10 +36,7 @@ function parseLinesJson(raw: string): { ok: true; lines: LinePayload[] } | { ok:
   }
 }
 
-export async function createShipment(
-  _prev: ShipmentFormState,
-  formData: FormData
-): Promise<ShipmentFormState> {
+async function createShipmentCore(formData: FormData): Promise<ShipmentFormState> {
   const manufacturerIdExisting = String(formData.get("manufacturerId") ?? "").trim();
   const newManufacturerName = String(formData.get("newManufacturerName") ?? "").trim();
 
@@ -106,6 +103,22 @@ export async function createShipment(
     return { error: "保存失败，请稍后重试。" };
   }
 
+  return null;
+}
+
+export async function createShipmentInline(formData: FormData): Promise<ShipmentFormState> {
+  const r = await createShipmentCore(formData);
+  if (r) return r;
+  revalidatePath("/shipments");
+  return null;
+}
+
+export async function createShipment(
+  _prev: ShipmentFormState,
+  formData: FormData
+): Promise<ShipmentFormState> {
+  const r = await createShipmentCore(formData);
+  if (r) return r;
   revalidatePath("/shipments");
   redirect("/shipments");
 }
