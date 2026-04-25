@@ -72,6 +72,8 @@ xy-sale/
 
 常见模式：`useActionState`、隐藏字段传 `linesJson`、`revalidatePath`、`redirect`；列表抽屉内保存用 `*Inline` + 仅 `revalidatePath`。
 
+补充：产品页内的「登记入库 / 登记发货」抽屉支持按图片识别结果直接回填“衣服名称 + 颜色 + 尺码 + 件数”；保存时后端会按名称优先匹配既有衣服档案并自动补齐 SKU，若不存在则自动创建衣服与 SKU（新建时 `nameInbound` 与 `nameManufacturer` 默认一致）。
+
 ## HTTP API Routes
 
 | 路径 | 说明 |

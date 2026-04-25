@@ -16,7 +16,7 @@ type InboundDrawerValues = {
   photo?: UploadFile[];
   recordedAt?: Dayjs;
   note?: string;
-  lines?: { productId?: string; skuId?: string; quantity?: number }[];
+  lines?: { productName?: string; color?: string; size?: string; quantity?: number }[];
 };
 
 type UploadApiSuccess = {
@@ -56,12 +56,14 @@ function inboundDrawerValuesToFormData(values: InboundDrawerValues): FormData {
 
   const lines = (values.lines ?? [])
     .map((r) => {
-      const skuId = String(r?.skuId ?? "").trim();
+      const productName = String(r?.productName ?? "").trim();
+      const color = String(r?.color ?? "").trim();
+      const size = String(r?.size ?? "").trim();
       const q = r?.quantity;
       const quantity = typeof q === "number" ? q : Number.parseInt(String(q ?? ""), 10);
-      return { skuId, quantity };
+      return { productName, color, size, quantity };
     })
-    .filter((r) => r.skuId && Number.isInteger(r.quantity) && r.quantity > 0);
+    .filter((r) => r.productName && r.color && r.size && Number.isInteger(r.quantity) && r.quantity > 0);
   fd.set("linesJson", JSON.stringify(lines));
 
   const uploaded = values.photo?.[0];
@@ -82,12 +84,34 @@ function norm(s: string): string {
   return s.replace(/\s+/g, "").toLowerCase();
 }
 
+function bestMatchManufacturerId(
+  name: string,
+  manufacturers: ManufacturerOption[],
+): string | null {
+  const target = norm(name);
+  if (!target) return null;
+  let exact: ManufacturerOption | null = null;
+  let fuzzy: ManufacturerOption | null = null;
+  for (const m of manufacturers) {
+    const n = norm(m.name);
+    if (!n) continue;
+    if (n === target) {
+      exact = m;
+      break;
+    }
+    if (!fuzzy && (n.includes(target) || target.includes(n))) {
+      fuzzy = m;
+    }
+  }
+  return exact?.id ?? fuzzy?.id ?? null;
+}
+
 function mapAiLinesToFormLines(
   aiLines: NonNullable<UploadApiSuccess["data"]["ai"]>["lines"],
   catalog: ShipmentCatalogProduct[],
-): { productId: string; skuId: string; quantity: number }[] {
+): { productName: string; color: string; size: string; quantity: number }[] {
   if (!aiLines || aiLines.length === 0) return [];
-  const rows: { productId: string; skuId: string; quantity: number }[] = [];
+  const rows: { productName: string; color: string; size: string; quantity: number }[] = [];
   for (const row of aiLines) {
     const q = Number(row.quantity);
     if (!Number.isFinite(q) || q <= 0) continue;
@@ -95,7 +119,7 @@ function mapAiLinesToFormLines(
     const color = row.color ? norm(row.color) : "";
     const size = row.size ? norm(row.size) : "";
     const productLabel = row.productLabel ? norm(row.productLabel) : "";
-    let hit: { productId: string; skuId: string } | null = null;
+    let hit: { productName: string; color: string; size: string } | null = null;
     for (const p of catalog) {
       if (
         productLabel &&
@@ -109,13 +133,30 @@ function mapAiLinesToFormLines(
         const bySkuLabel = skuLabel && (sNorm.includes(skuLabel) || skuLabel.includes(sNorm));
         const byColorSize = color && size && sNorm.includes(color) && sNorm.includes(size);
         if (bySkuLabel || byColorSize) {
-          hit = { productId: p.id, skuId: s.id };
+          const parts = s.label.split(/[\/|｜]/).map((x) => x.trim());
+          const c = row.color?.trim() || parts[0] || "";
+          const z = row.size?.trim() || parts[1] || "";
+          hit = { productName: p.label, color: c, size: z };
           break;
         }
       }
       if (hit) break;
     }
-    if (hit) rows.push({ ...hit, quantity: Math.max(1, Math.round(q)) });
+    if (hit) {
+      rows.push({ ...hit, quantity: Math.max(1, Math.round(q)) });
+      continue;
+    }
+    const fallbackName = row.productLabel?.trim() || "";
+    const fallbackColor = row.color?.trim() || "";
+    const fallbackSize = row.size?.trim() || "";
+    if (fallbackName && fallbackColor && fallbackSize) {
+      rows.push({
+        productName: fallbackName,
+        color: fallbackColor,
+        size: fallbackSize,
+        quantity: Math.max(1, Math.round(q)),
+      });
+    }
   }
   return rows;
 }
@@ -136,19 +177,6 @@ export function InboundRegistrationDrawer({
 }) {
   const formRef = useRef<ProFormInstance>(undefined);
   const [lastAiUrl, setLastAiUrl] = useState<string>("");
-  const hasCatalog = useMemo(() => catalog.some((p) => p.skus.length > 0), [catalog]);
-
-  const productOptions = useMemo(
-    () =>
-      catalog.map((p) => ({
-        label: p.label,
-        value: p.id,
-        disabled: p.skus.length === 0,
-      })),
-    [catalog],
-  );
-
-  const catalogByProductId = useMemo(() => new Map(catalog.map((p) => [p.id, p])), [catalog]);
 
   const drawerColumns = useMemo<ProFormColumnsType<InboundDrawerValues>[]>(
     () => [
@@ -204,37 +232,25 @@ export function InboundRegistrationDrawer({
         },
         columns: [
           {
-            title: "衣服",
-            dataIndex: "productId",
-            valueType: "select",
-            colProps: { xs: 24, md: 10 },
-            fieldProps: {
-              options: productOptions,
-              placeholder: "请选择",
-              showSearch: true,
-              optionFilterProp: "label",
-            },
+            title: "衣服名称",
+            dataIndex: "productName",
+            valueType: "text",
+            colProps: { xs: 24, md: 8 },
+            fieldProps: { placeholder: "如：春季短袖T恤" },
           },
           {
-            valueType: "dependency",
-            name: ["productId"],
-            columns: (deps: { productId?: string }) => {
-              const p = deps?.productId ? catalogByProductId.get(deps.productId) : undefined;
-              const skuOpts = p?.skus.map((s) => ({ label: s.label, value: s.id })) ?? [];
-              return [
-                {
-                  title: "颜色 / 尺码（SKU）",
-                  dataIndex: "skuId",
-                  valueType: "select",
-                  colProps: { xs: 24, md: 10 },
-                  fieldProps: {
-                    options: skuOpts,
-                    placeholder: "请选择",
-                    disabled: !deps?.productId,
-                  },
-                },
-              ];
-            },
+            title: "颜色",
+            dataIndex: "color",
+            valueType: "text",
+            colProps: { xs: 24, md: 6 },
+            fieldProps: { placeholder: "如：黑色" },
+          },
+          {
+            title: "尺码",
+            dataIndex: "size",
+            valueType: "text",
+            colProps: { xs: 24, md: 6 },
+            fieldProps: { placeholder: "如：L" },
           },
           {
             title: "件数",
@@ -246,7 +262,7 @@ export function InboundRegistrationDrawer({
         ],
       },
     ],
-    [catalogByProductId, productOptions],
+    [],
   );
 
   return (
@@ -279,7 +295,7 @@ export function InboundRegistrationDrawer({
             labelAlign="right"
             submitter={{
               searchConfig: { submitText: "保存入库登记", resetText: "取消" },
-              submitButtonProps: { disabled: !hasCatalog },
+              submitButtonProps: {},
               resetButtonProps: { onClick: () => onOpenChange(false) },
             }}
             columns={drawerColumns}
@@ -287,10 +303,6 @@ export function InboundRegistrationDrawer({
               lines: [{}],
             }}
             onFinish={async (values) => {
-              if (!hasCatalog) {
-                message.warning("暂无带 SKU 的衣服档案，请先在上方维护档案。");
-                return false;
-              }
               const uploadItem = values.photo?.[0];
               const uploadResponse = uploadItem?.response as
                 | UploadApiSuccess
@@ -329,8 +341,9 @@ export function InboundRegistrationDrawer({
               const patch: Record<string, unknown> = {};
               if (mapped.length > 0) {
                 patch.lines = mapped.map((x) => ({
-                  productId: x.productId,
-                  skuId: x.skuId,
+                  productName: x.productName,
+                  color: x.color,
+                  size: x.size,
                   quantity: x.quantity,
                 }));
               }
@@ -356,7 +369,7 @@ type ShipmentDrawerValues = {
   photo?: UploadFile[];
   recordedAt?: Dayjs;
   note?: string;
-  lines?: { productId?: string; skuId?: string; quantity?: number }[];
+  lines?: { productName?: string; color?: string; size?: string; quantity?: number }[];
 };
 
 function shipmentDrawerValuesToFormData(values: ShipmentDrawerValues): FormData {
@@ -369,12 +382,14 @@ function shipmentDrawerValuesToFormData(values: ShipmentDrawerValues): FormData 
 
   const lines = (values.lines ?? [])
     .map((r) => {
-      const skuId = String(r?.skuId ?? "").trim();
+      const productName = String(r?.productName ?? "").trim();
+      const color = String(r?.color ?? "").trim();
+      const size = String(r?.size ?? "").trim();
       const q = r?.quantity;
       const quantity = typeof q === "number" ? q : Number.parseInt(String(q ?? ""), 10);
-      return { skuId, quantity };
+      return { productName, color, size, quantity };
     })
-    .filter((r) => r.skuId && Number.isInteger(r.quantity) && r.quantity > 0);
+    .filter((r) => r.productName && r.color && r.size && Number.isInteger(r.quantity) && r.quantity > 0);
   fd.set("linesJson", JSON.stringify(lines));
 
   const uploaded = values.photo?.[0];
@@ -408,24 +423,11 @@ export function ShipmentRegistrationDrawer({
 }) {
   const formRef = useRef<ProFormInstance>(undefined);
   const [lastAiUrl, setLastAiUrl] = useState<string>("");
-  const hasCatalog = useMemo(() => catalog.some((p) => p.skus.length > 0), [catalog]);
 
   const mfrOptions = useMemo(
     () => manufacturers.map((m) => ({ label: m.name, value: m.id })),
     [manufacturers],
   );
-
-  const productOptions = useMemo(
-    () =>
-      catalog.map((p) => ({
-        label: p.label,
-        value: p.id,
-        disabled: p.skus.length === 0,
-      })),
-    [catalog],
-  );
-
-  const catalogByProductId = useMemo(() => new Map(catalog.map((p) => [p.id, p])), [catalog]);
 
   const drawerColumns = useMemo<ProFormColumnsType<ShipmentDrawerValues>[]>(
     () => [
@@ -508,37 +510,25 @@ export function ShipmentRegistrationDrawer({
         },
         columns: [
           {
-            title: "衣服",
-            dataIndex: "productId",
-            valueType: "select",
-            colProps: { xs: 24, md: 10 },
-            fieldProps: {
-              options: productOptions,
-              placeholder: "请选择",
-              showSearch: true,
-              optionFilterProp: "label",
-            },
+            title: "衣服名称",
+            dataIndex: "productName",
+            valueType: "text",
+            colProps: { xs: 24, md: 8 },
+            fieldProps: { placeholder: "如：春季短袖T恤" },
           },
           {
-            valueType: "dependency",
-            name: ["productId"],
-            columns: (deps: { productId?: string }) => {
-              const p = deps?.productId ? catalogByProductId.get(deps.productId) : undefined;
-              const skuOpts = p?.skus.map((s) => ({ label: s.label, value: s.id })) ?? [];
-              return [
-                {
-                  title: "颜色 / 尺码（SKU）",
-                  dataIndex: "skuId",
-                  valueType: "select",
-                  colProps: { xs: 24, md: 10 },
-                  fieldProps: {
-                    options: skuOpts,
-                    placeholder: "请选择",
-                    disabled: !deps?.productId,
-                  },
-                },
-              ];
-            },
+            title: "颜色",
+            dataIndex: "color",
+            valueType: "text",
+            colProps: { xs: 24, md: 6 },
+            fieldProps: { placeholder: "如：黑色" },
+          },
+          {
+            title: "尺码",
+            dataIndex: "size",
+            valueType: "text",
+            colProps: { xs: 24, md: 6 },
+            fieldProps: { placeholder: "如：L" },
           },
           {
             title: "件数",
@@ -550,7 +540,7 @@ export function ShipmentRegistrationDrawer({
         ],
       },
     ],
-    [catalogByProductId, mfrOptions, productOptions],
+    [mfrOptions],
   );
 
   return (
@@ -583,7 +573,7 @@ export function ShipmentRegistrationDrawer({
             labelAlign="right"
             submitter={{
               searchConfig: { submitText: "保存发货登记", resetText: "取消" },
-              submitButtonProps: { disabled: !hasCatalog },
+              submitButtonProps: {},
               resetButtonProps: { onClick: () => onOpenChange(false) },
             }}
             columns={drawerColumns}
@@ -591,10 +581,6 @@ export function ShipmentRegistrationDrawer({
               lines: [{}],
             }}
             onFinish={async (values) => {
-              if (!hasCatalog) {
-                message.warning("暂无带 SKU 的衣服档案，请先在上方维护档案。");
-                return false;
-              }
               const uploadItem = values.photo?.[0];
               const uploadResponse = uploadItem?.response as
                 | UploadApiSuccess
@@ -633,8 +619,9 @@ export function ShipmentRegistrationDrawer({
               const patch: Record<string, unknown> = {};
               if (mapped.length > 0) {
                 patch.lines = mapped.map((x) => ({
-                  productId: x.productId,
-                  skuId: x.skuId,
+                  productName: x.productName,
+                  color: x.color,
+                  size: x.size,
                   quantity: x.quantity,
                 }));
               }
@@ -644,11 +631,12 @@ export function ShipmentRegistrationDrawer({
                 if (d.isValid()) patch.recordedAt = d;
               }
               if (ai.manufacturerName) {
-                const exact = manufacturers.find((m) => norm(m.name) === norm(ai.manufacturerName ?? ""));
-                if (exact) {
-                  patch.manufacturerId = exact.id;
+                const matchedId = bestMatchManufacturerId(ai.manufacturerName, manufacturers);
+                if (matchedId) {
+                  patch.manufacturerId = matchedId;
                   patch.newManufacturerName = "";
                 } else {
+                  patch.manufacturerId = "";
                   patch.newManufacturerName = ai.manufacturerName;
                 }
               }

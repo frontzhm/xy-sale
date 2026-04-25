@@ -1,5 +1,7 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
+
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -8,32 +10,109 @@ import { savePhotoBuffer } from "@/lib/storage/save-file";
 
 export type ShipmentFormState = { error: string } | null;
 
-type LinePayload = { skuId: string; quantity: number };
+type LinePayload = {
+  skuId?: string;
+  productName?: string;
+  color?: string;
+  size?: string;
+  quantity: number;
+};
 
 function parseLinesJson(raw: string): { ok: true; lines: LinePayload[] } | { ok: false; error: string } {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return { ok: false, error: "明细格式错误。" };
     const lines: LinePayload[] = [];
-    const seenSku = new Set<string>();
+    const seenKey = new Set<string>();
     for (const item of parsed) {
       if (!item || typeof item !== "object") continue;
       const skuId = String((item as { skuId?: string }).skuId ?? "").trim();
+      const productName = String((item as { productName?: string }).productName ?? "").trim();
+      const color = String((item as { color?: string }).color ?? "").trim();
+      const size = String((item as { size?: string }).size ?? "").trim();
       const q = Number((item as { quantity?: unknown }).quantity);
-      if (!skuId || !Number.isInteger(q) || q <= 0) continue;
-      if (seenSku.has(skuId)) {
-        return { ok: false, error: "同一 SKU 不能重复添加，请合并数量。" };
+      if (!Number.isInteger(q) || q <= 0) continue;
+      const canUseSku = !!skuId;
+      const canUseName = !!(productName && color && size);
+      if (!canUseSku && !canUseName) continue;
+      const key = canUseSku ? `sku:${skuId}` : `name:${productName}\0${color}\0${size}`;
+      if (seenKey.has(key)) {
+        return { ok: false, error: "同一明细不能重复添加，请合并数量。" };
       }
-      seenSku.add(skuId);
-      lines.push({ skuId, quantity: q });
+      seenKey.add(key);
+      lines.push({
+        skuId: canUseSku ? skuId : undefined,
+        productName: canUseName ? productName : undefined,
+        color: canUseName ? color : undefined,
+        size: canUseName ? size : undefined,
+        quantity: q,
+      });
     }
     if (lines.length === 0) {
-      return { ok: false, error: "请至少添加一行有效的发货明细（SKU + 件数）。" };
+      return { ok: false, error: "请至少添加一行有效的发货明细（衣服名称+颜色+尺码+件数）。" };
     }
     return { ok: true, lines };
   } catch {
     return { ok: false, error: "明细格式错误。" };
   }
+}
+
+function normalizeName(s: string): string {
+  return s.trim().replace(/\s+/g, " ");
+}
+
+async function resolveOrCreateShipmentSkuId(args: {
+  line: LinePayload;
+  manufacturerId: string | null;
+}): Promise<{ ok: true; skuId: string } | { ok: false; error: string }> {
+  const { line, manufacturerId } = args;
+  if (line.skuId) {
+    const sku = await prisma.productSku.findUnique({ where: { id: line.skuId }, select: { id: true } });
+    if (!sku) return { ok: false, error: "部分 SKU 不存在，请刷新页面后重试。" };
+    return { ok: true, skuId: sku.id };
+  }
+
+  const productName = normalizeName(line.productName ?? "");
+  const color = normalizeName(line.color ?? "");
+  const size = normalizeName(line.size ?? "");
+  if (!productName || !color || !size) {
+    return { ok: false, error: "明细缺少衣服名称、颜色或尺码。" };
+  }
+
+  let product = await prisma.product.findFirst({
+    where: {
+      OR: [{ nameInbound: productName }, { nameManufacturer: productName }],
+    },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (!product) {
+    let resolvedManufacturerId = manufacturerId;
+    if (!resolvedManufacturerId) {
+      const m = await prisma.manufacturer.create({ data: { name: productName } });
+      resolvedManufacturerId = m.id;
+    }
+    product = await prisma.product.create({
+      data: {
+        code: randomUUID().replace(/-/g, ""),
+        nameInbound: productName,
+        nameManufacturer: productName,
+        manufacturerId: resolvedManufacturerId,
+      },
+      select: { id: true },
+    });
+  }
+
+  const sku = await prisma.productSku.upsert({
+    where: {
+      productId_color_size: { productId: product.id, color, size },
+    },
+    create: { productId: product.id, color, size },
+    update: {},
+    select: { id: true },
+  });
+  return { ok: true, skuId: sku.id };
 }
 
 async function createShipmentCore(formData: FormData): Promise<ShipmentFormState> {
@@ -84,13 +163,11 @@ async function createShipmentCore(formData: FormData): Promise<ShipmentFormState
   if (!linesParsed.ok) return { error: linesParsed.error };
   const { lines } = linesParsed;
 
-  const skuIds = lines.map((l) => l.skuId);
-  const skus = await prisma.productSku.findMany({
-    where: { id: { in: skuIds } },
-    select: { id: true },
-  });
-  if (skus.length !== skuIds.length) {
-    return { error: "部分 SKU 不存在，请刷新页面后重试。" };
+  const resolved: { skuId: string; quantity: number }[] = [];
+  for (const line of lines) {
+    const r = await resolveOrCreateShipmentSkuId({ line, manufacturerId });
+    if (!r.ok) return { error: r.error };
+    resolved.push({ skuId: r.skuId, quantity: line.quantity });
   }
 
   try {
@@ -102,7 +179,7 @@ async function createShipmentCore(formData: FormData): Promise<ShipmentFormState
         note,
         recordedAt,
         lines: {
-          create: lines.map((l) => ({
+          create: resolved.map((l) => ({
             skuId: l.skuId,
             quantity: l.quantity,
           })),
@@ -195,13 +272,11 @@ export async function updateShipment(
   if (!linesParsed.ok) return { error: linesParsed.error };
   const { lines } = linesParsed;
 
-  const skuIds = lines.map((l) => l.skuId);
-  const skus = await prisma.productSku.findMany({
-    where: { id: { in: skuIds } },
-    select: { id: true },
-  });
-  if (skus.length !== skuIds.length) {
-    return { error: "部分 SKU 不存在，请刷新页面后重试。" };
+  const resolved: { skuId: string; quantity: number }[] = [];
+  for (const line of lines) {
+    const r = await resolveOrCreateShipmentSkuId({ line, manufacturerId });
+    if (!r.ok) return { error: r.error };
+    resolved.push({ skuId: r.skuId, quantity: line.quantity });
   }
 
   try {
@@ -216,7 +291,7 @@ export async function updateShipment(
           note,
           recordedAt,
           lines: {
-            create: lines.map((l) => ({
+            create: resolved.map((l) => ({
               skuId: l.skuId,
               quantity: l.quantity,
             })),
