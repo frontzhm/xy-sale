@@ -29,6 +29,8 @@ type UploadApiSuccess = {
       note?: string;
       recordedAt?: string;
       manufacturerName?: string;
+      orderNo?: string;
+      batchNo?: string;
       lines?: {
         productLabel?: string;
         skuLabel?: string;
@@ -37,6 +39,8 @@ type UploadApiSuccess = {
         quantity?: number;
       }[];
     } | null;
+    duplicateShipment?: { id: string; recordedAt: string } | null;
+    duplicateInbound?: { id: string; recordedAt: string } | null;
   };
 };
 
@@ -48,9 +52,42 @@ function formatRecordedAtForServer(v: unknown): string {
   return String(v);
 }
 
+function buildLineSummaryNote(
+  lines: Array<{ productName?: string; quantity?: number }>,
+): string {
+  const items = lines
+    .map((r) => {
+      const name = String(r.productName ?? "").trim();
+      const q = Number(r.quantity);
+      return { name, quantity: Number.isFinite(q) ? Math.max(0, Math.round(q)) : 0 };
+    })
+    .filter((x) => x.name && x.quantity > 0);
+
+  if (items.length === 0) return "";
+
+  const byName = new Map<string, number>();
+  let total = 0;
+  for (const item of items) {
+    total += item.quantity;
+    byName.set(item.name, (byName.get(item.name) ?? 0) + item.quantity);
+  }
+
+  const linesText = Array.from(byName.entries()).map(([name, qty]) => `${name}：${qty}件`);
+  return [`总件数：${total}件`, ...linesText].join("\n");
+}
+
 function inboundDrawerValuesToFormData(values: InboundDrawerValues): FormData {
   const fd = new FormData();
-  fd.set("note", String(values.note ?? "").trim());
+  const uploaded = values.photo?.[0];
+  const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
+  const aiBatchNo =
+    response && response.success ? String(response.data.ai?.batchNo ?? "").trim() : "";
+  const summaryNote = buildLineSummaryNote(values.lines ?? []);
+  const batchLine = aiBatchNo ? `批次：${aiBatchNo}` : "";
+  const rawNote = String(values.note ?? "").trim();
+  const noteCore = [batchLine, summaryNote].filter((x) => x).join("\n");
+  const note = rawNote ? (noteCore ? `${noteCore}\n\n${rawNote}` : rawNote) : noteCore;
+  fd.set("note", note);
   const ra = formatRecordedAtForServer(values.recordedAt);
   if (ra) fd.set("recordedAt", ra);
 
@@ -66,8 +103,6 @@ function inboundDrawerValuesToFormData(values: InboundDrawerValues): FormData {
     .filter((r) => r.productName && r.color && r.size && Number.isInteger(r.quantity) && r.quantity > 0);
   fd.set("linesJson", JSON.stringify(lines));
 
-  const uploaded = values.photo?.[0];
-  const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
   const photoUrl = uploaded?.url ?? (response && response.success ? response.data.url : "");
   const photoMimeType =
     response && response.success && response.data.mimeType ? response.data.mimeType : "";
@@ -232,32 +267,39 @@ export function InboundRegistrationDrawer({
         },
         columns: [
           {
-            title: "衣服名称",
-            dataIndex: "productName",
-            valueType: "text",
-            colProps: { xs: 24, md: 8 },
-            fieldProps: { placeholder: "如：春季短袖T恤" },
-          },
-          {
-            title: "颜色",
-            dataIndex: "color",
-            valueType: "text",
-            colProps: { xs: 24, md: 6 },
-            fieldProps: { placeholder: "如：黑色" },
-          },
-          {
-            title: "尺码",
-            dataIndex: "size",
-            valueType: "text",
-            colProps: { xs: 24, md: 6 },
-            fieldProps: { placeholder: "如：L" },
-          },
-          {
-            title: "件数",
-            dataIndex: "quantity",
-            valueType: "digit",
-            colProps: { xs: 24, md: 4 },
-            fieldProps: { min: 1, precision: 0, placeholder: "件数" },
+            valueType: "group",
+            title: "衣服信息",
+            colProps: { span: 24 },
+            columns: [
+              {
+                title: "",
+                dataIndex: "productName",
+                valueType: "text",
+                colProps: { span: 6 },
+                fieldProps: { placeholder: "如：春季短袖T恤" },
+              },
+              {
+                title: "",
+                dataIndex: "color",
+                valueType: "text",
+                colProps: { span: 6 },
+                fieldProps: { placeholder: "如：黑色" },
+              },
+              {
+                title: "",
+                dataIndex: "size",
+                valueType: "text",
+                colProps: { span: 6 },
+                fieldProps: { placeholder: "如：L" },
+              },
+              {
+                title: "",
+                dataIndex: "quantity",
+                valueType: "digit",
+                colProps: { span: 6 },
+                fieldProps: { min: 1, precision: 0, placeholder: "件数" },
+              },
+            ],
           },
         ],
       },
@@ -308,6 +350,17 @@ export function InboundRegistrationDrawer({
                 | UploadApiSuccess
                 | UploadApiFail
                 | undefined;
+              if (
+                uploadResponse &&
+                uploadResponse.success &&
+                uploadResponse.data.duplicateInbound
+              ) {
+                const t = new Date(uploadResponse.data.duplicateInbound.recordedAt).toLocaleString(
+                  "zh-CN",
+                );
+                message.error(`该批次已登记（时间：${t}），请勿重复提交`);
+                return false;
+              }
               const uploadedUrl =
                 uploadItem?.url ??
                 (uploadResponse && uploadResponse.success ? uploadResponse.data.url : "");
@@ -347,7 +400,16 @@ export function InboundRegistrationDrawer({
                   quantity: x.quantity,
                 }));
               }
-              if (ai.note) patch.note = ai.note;
+              const summaryFromAi = buildLineSummaryNote(
+                mapped.map((x) => ({ productName: x.productName, quantity: x.quantity })),
+              );
+              const aiNote = String(ai.note ?? "").trim();
+              const aiBatchNo = String(ai.batchNo ?? "").trim();
+              const batchLine = aiBatchNo ? `批次：${aiBatchNo}` : "";
+              const noteCore = [batchLine, summaryFromAi].filter((x) => x).join("\n");
+              if (noteCore || aiNote) {
+                patch.note = aiNote ? (noteCore ? `${noteCore}\n\n${aiNote}` : aiNote) : noteCore;
+              }
               if (ai.recordedAt) {
                 const d = dayjs(ai.recordedAt);
                 if (d.isValid()) patch.recordedAt = d;
@@ -376,7 +438,16 @@ function shipmentDrawerValuesToFormData(values: ShipmentDrawerValues): FormData 
   const fd = new FormData();
   fd.set("manufacturerId", String(values.manufacturerId ?? "").trim());
   fd.set("newManufacturerName", String(values.newManufacturerName ?? "").trim());
-  fd.set("note", String(values.note ?? "").trim());
+  const uploaded = values.photo?.[0];
+  const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
+  const aiOrderNo =
+    response && response.success ? String(response.data.ai?.orderNo ?? "").trim() : "";
+  const summaryNote = buildLineSummaryNote(values.lines ?? []);
+  const orderNoLine = aiOrderNo ? `单号：${aiOrderNo}` : "";
+  const noteCore = [orderNoLine, summaryNote].filter((x) => x).join("\n");
+  const rawNote = String(values.note ?? "").trim();
+  const note = rawNote ? (noteCore ? `${noteCore}\n\n${rawNote}` : rawNote) : noteCore;
+  fd.set("note", note);
   const ra = formatRecordedAtForServer(values.recordedAt);
   if (ra) fd.set("recordedAt", ra);
 
@@ -392,8 +463,6 @@ function shipmentDrawerValuesToFormData(values: ShipmentDrawerValues): FormData 
     .filter((r) => r.productName && r.color && r.size && Number.isInteger(r.quantity) && r.quantity > 0);
   fd.set("linesJson", JSON.stringify(lines));
 
-  const uploaded = values.photo?.[0];
-  const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
   const photoUrl = uploaded?.url ?? (response && response.success ? response.data.url : "");
   const photoMimeType =
     response && response.success && response.data.mimeType ? response.data.mimeType : "";
@@ -510,32 +579,39 @@ export function ShipmentRegistrationDrawer({
         },
         columns: [
           {
-            title: "衣服名称",
-            dataIndex: "productName",
-            valueType: "text",
-            colProps: { xs: 24, md: 8 },
-            fieldProps: { placeholder: "如：春季短袖T恤" },
-          },
-          {
-            title: "颜色",
-            dataIndex: "color",
-            valueType: "text",
-            colProps: { xs: 24, md: 6 },
-            fieldProps: { placeholder: "如：黑色" },
-          },
-          {
-            title: "尺码",
-            dataIndex: "size",
-            valueType: "text",
-            colProps: { xs: 24, md: 6 },
-            fieldProps: { placeholder: "如：L" },
-          },
-          {
-            title: "件数",
-            dataIndex: "quantity",
-            valueType: "digit",
-            colProps: { xs: 24, md: 4 },
-            fieldProps: { min: 1, precision: 0, placeholder: "件数" },
+            valueType: "group",
+            title: "衣服信息",
+            colProps: { span: 24 },
+            columns: [
+              {
+                title: "",
+                dataIndex: "productName",
+                valueType: "text",
+                colProps: { span: 6 },
+                fieldProps: { placeholder: "如：春季短袖T恤" },
+              },
+              {
+                title: "",
+                dataIndex: "color",
+                valueType: "text",
+                colProps: { span: 6 },
+                fieldProps: { placeholder: "如：黑色" },
+              },
+              {
+                title: "",
+                dataIndex: "size",
+                valueType: "text",
+                colProps: { span: 6 },
+                fieldProps: { placeholder: "如：L" },
+              },
+              {
+                title: "",
+                dataIndex: "quantity",
+                valueType: "digit",
+                colProps: { span: 6 },
+                fieldProps: { min: 1, precision: 0, placeholder: "件数" },
+              },
+            ],
           },
         ],
       },
@@ -586,6 +662,17 @@ export function ShipmentRegistrationDrawer({
                 | UploadApiSuccess
                 | UploadApiFail
                 | undefined;
+              if (
+                uploadResponse &&
+                uploadResponse.success &&
+                uploadResponse.data.duplicateShipment
+              ) {
+                const t = new Date(uploadResponse.data.duplicateShipment.recordedAt).toLocaleString(
+                  "zh-CN",
+                );
+                message.error(`该单号已登记（时间：${t}），请勿重复提交`);
+                return false;
+              }
               const uploadedUrl =
                 uploadItem?.url ??
                 (uploadResponse && uploadResponse.success ? uploadResponse.data.url : "");
@@ -625,7 +712,16 @@ export function ShipmentRegistrationDrawer({
                   quantity: x.quantity,
                 }));
               }
-              if (ai.note) patch.note = ai.note;
+              const summaryFromAi = buildLineSummaryNote(
+                mapped.map((x) => ({ productName: x.productName, quantity: x.quantity })),
+              );
+              const aiNote = String(ai.note ?? "").trim();
+              const aiOrderNo = String(ai.orderNo ?? "").trim();
+              const orderNoLine = aiOrderNo ? `单号：${aiOrderNo}` : "";
+              const noteCore = [orderNoLine, summaryFromAi].filter((x) => x).join("\n");
+              if (noteCore || aiNote) {
+                patch.note = aiNote ? (noteCore ? `${noteCore}\n\n${aiNote}` : aiNote) : noteCore;
+              }
               if (ai.recordedAt) {
                 const d = dayjs(ai.recordedAt);
                 if (d.isValid()) patch.recordedAt = d;

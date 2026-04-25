@@ -124,6 +124,8 @@ export function shipmentListWhereFromQ(q: string): Prisma.ShipmentRecordWhereInp
   return {
     OR: [
       { note: { contains: t } },
+      { note: { contains: `单号：${t}` } },
+      { note: { contains: `单号:${t}` } },
       { manufacturer: { name: { contains: t } } },
       {
         lines: {

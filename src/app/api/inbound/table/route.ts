@@ -10,10 +10,19 @@ type Row = {
   id: string;
   photoFileName: string;
   recordedAt: string;
+  batchNo: string | null;
   lineCount: number;
   totalQty: number;
   note: string | null;
 };
+
+function extractBatchNo(note: string | null): string | null {
+  if (!note) return null;
+  const m = note.match(/批次[:：]\s*([^\n\r]+)/);
+  if (!m) return null;
+  const v = m[1]?.trim();
+  return v ? v : null;
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -67,6 +76,7 @@ export async function GET(req: NextRequest) {
     id: r.id,
     photoFileName: r.photoFileName,
     recordedAt: r.recordedAt.toISOString(),
+    batchNo: extractBatchNo(r.note),
     lineCount: r.lines.length,
     totalQty: r.lines.reduce((acc, l) => acc + l.quantity, 0),
     note: r.note,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { parseImageWithMoonshot } from "@/lib/ai/moonshot-image-parse";
+import { prisma } from "@/lib/prisma";
 import { uploadImageToOss } from "@/lib/storage/oss";
 
 export const runtime = "nodejs";
@@ -29,6 +30,8 @@ export async function POST(request: Request) {
     const imageDataUrl = `data:${file.type || "image/jpeg"};base64,${buf.toString("base64")}`;
     let ai = null;
     let aiError: string | null = null;
+    let duplicateShipment: { id: string; recordedAt: string } | null = null;
+    let duplicateInbound: { id: string; recordedAt: string } | null = null;
     if (mode) {
       try {
         ai = await parseImageWithMoonshot({
@@ -36,6 +39,42 @@ export async function POST(request: Request) {
           imageDataUrl,
           mode,
         });
+        if (mode === "shipment") {
+          const orderNo = String(ai?.orderNo ?? "").trim();
+          if (orderNo) {
+            const duplicated = await prisma.shipmentRecord.findFirst({
+              where: {
+                note: { contains: `单号：${orderNo}` },
+              },
+              select: { id: true, recordedAt: true },
+              orderBy: { createdAt: "desc" },
+            });
+            if (duplicated) {
+              duplicateShipment = {
+                id: duplicated.id,
+                recordedAt: duplicated.recordedAt.toISOString(),
+              };
+            }
+          }
+        }
+        if (mode === "inbound") {
+          const batchNo = String(ai?.batchNo ?? "").trim();
+          if (batchNo) {
+            const duplicated = await prisma.inboundRecord.findFirst({
+              where: {
+                note: { contains: `批次：${batchNo}` },
+              },
+              select: { id: true, recordedAt: true },
+              orderBy: { createdAt: "desc" },
+            });
+            if (duplicated) {
+              duplicateInbound = {
+                id: duplicated.id,
+                recordedAt: duplicated.recordedAt.toISOString(),
+              };
+            }
+          }
+        }
       } catch (error) {
         console.error("moonshot parse error:", error);
         aiError = error instanceof Error ? error.message : String(error);
@@ -48,6 +87,8 @@ export async function POST(request: Request) {
         ...uploaded,
         ai,
         aiError,
+        duplicateShipment,
+        duplicateInbound,
       },
     });
   } catch (error) {

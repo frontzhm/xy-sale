@@ -30,6 +30,7 @@ type ShipmentTableRow = {
   photoFileName: string;
   recordedAt: string;
   manufacturerName: string | null;
+  orderNo: string | null;
   lineCount: number;
   totalQty: number;
   note: string | null;
@@ -246,7 +247,7 @@ export function ShipmentListPageClient({
         title: "综合搜索",
         dataIndex: "searchQ",
         hideInTable: true,
-        fieldProps: { placeholder: "备注、登记厂家、入库名、厂家发货名…" },
+        fieldProps: { placeholder: "订单号、备注、登记厂家、入库名、厂家发货名…" },
       },
       {
         title: "照片",
@@ -280,6 +281,14 @@ export function ShipmentListPageClient({
         ellipsis: true,
         search: false,
         render: (_, row) => row.manufacturerName ?? "—",
+      },
+      {
+        title: "订单号",
+        dataIndex: "orderNo",
+        width: 150,
+        ellipsis: true,
+        search: false,
+        render: (_, row) => row.orderNo ?? "—",
       },
       {
         title: "行数",

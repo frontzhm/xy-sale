@@ -10,6 +10,8 @@ export type ParsedImageFormData = {
   note?: string;
   recordedAt?: string;
   manufacturerName?: string;
+  orderNo?: string;
+  batchNo?: string;
   lines: ParsedLine[];
 };
 
@@ -54,6 +56,8 @@ function normalizeParsed(input: unknown): ParsedImageFormData {
     recordedAt: typeof obj.recordedAt === "string" ? obj.recordedAt.trim() : undefined,
     manufacturerName:
       typeof obj.manufacturerName === "string" ? obj.manufacturerName.trim() : undefined,
+    orderNo: typeof obj.orderNo === "string" ? obj.orderNo.trim() : undefined,
+    batchNo: typeof obj.batchNo === "string" ? obj.batchNo.trim() : undefined,
     lines,
   };
 }
@@ -68,8 +72,8 @@ export async function parseImageWithMoonshot(args: {
 
   const prompt =
     args.mode === "shipment"
-      ? "你是发货单据识别助手。请识别图片并只返回 JSON。厂家名优先从图片最上方标题提取：若出现“xxx销售单”，则 manufacturerName 必须取“销售单”前面的 xxx（去掉空格与无关符号）。字段：manufacturerName(字符串,可空)、recordedAt(ISO时间字符串,可空)、note(字符串,可空)、lines(数组)。lines 每项字段：productLabel(可空)、skuLabel(可空)、color(可空)、size(可空)、quantity(正整数)。不要返回任何解释文字。"
-      : "你是入库单据识别助手。请识别图片并只返回 JSON。厂家名优先从图片最上方标题提取：若出现“xxx销售单”，则 manufacturerName 必须取“销售单”前面的 xxx（去掉空格与无关符号）。字段：manufacturerName(字符串,可空)、recordedAt(ISO时间字符串,可空)、note(字符串,可空)、lines(数组)。lines 每项字段：productLabel(可空)、skuLabel(可空)、color(可空)、size(可空)、quantity(正整数)。不要返回任何解释文字。";
+      ? "你是发货单据识别助手。请识别图片并只返回 JSON。厂家名优先从图片最上方标题提取：若出现“xxx销售单”，则 manufacturerName 必须取“销售单”前面的 xxx（去掉空格与无关符号）。同时识别单号与批次，分别填到 orderNo、batchNo。字段：manufacturerName(字符串,可空)、orderNo(字符串,可空)、batchNo(字符串,可空)、recordedAt(ISO时间字符串,可空)、note(字符串,可空)、lines(数组)。lines 每项字段：productLabel(可空)、skuLabel(可空)、color(可空)、size(可空)、quantity(正整数)。不要返回任何解释文字。"
+      : "你是入库单据识别助手。请识别图片并只返回 JSON。厂家名优先从图片最上方标题提取：若出现“xxx销售单”，则 manufacturerName 必须取“销售单”前面的 xxx（去掉空格与无关符号）。同时识别单号与批次，分别填到 orderNo、batchNo。字段：manufacturerName(字符串,可空)、orderNo(字符串,可空)、batchNo(字符串,可空)、recordedAt(ISO时间字符串,可空)、note(字符串,可空)、lines(数组)。lines 每项字段：productLabel(可空)、skuLabel(可空)、color(可空)、size(可空)、quantity(正整数)。不要返回任何解释文字。";
 
   const resp = await fetch("https://api.moonshot.cn/v1/chat/completions", {
     method: "POST",

@@ -11,10 +11,19 @@ type Row = {
   photoFileName: string;
   recordedAt: string;
   manufacturerName: string | null;
+  orderNo: string | null;
   lineCount: number;
   totalQty: number;
   note: string | null;
 };
+
+function extractOrderNo(note: string | null): string | null {
+  if (!note) return null;
+  const m = note.match(/单号[:：]\s*([^\n\r]+)/);
+  if (!m) return null;
+  const v = m[1]?.trim();
+  return v ? v : null;
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -70,6 +79,7 @@ export async function GET(req: NextRequest) {
     photoFileName: r.photoFileName,
     recordedAt: r.recordedAt.toISOString(),
     manufacturerName: r.manufacturer?.name ?? null,
+    orderNo: extractOrderNo(r.note),
     lineCount: r.lines.length,
     totalQty: r.lines.reduce((acc, l) => acc + l.quantity, 0),
     note: r.note,

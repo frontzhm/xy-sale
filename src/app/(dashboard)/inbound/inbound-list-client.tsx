@@ -29,6 +29,7 @@ type InboundTableRow = {
   id: string;
   photoFileName: string;
   recordedAt: string;
+  batchNo: string | null;
   lineCount: number;
   totalQty: number;
   note: string | null;
@@ -43,7 +44,13 @@ type InboundDrawerValues = {
 
 type UploadApiSuccess = {
   success: true;
-  data: { fileName: string; url: string; mimeType: string | null };
+  data: {
+    fileName: string;
+    url: string;
+    mimeType: string | null;
+    ai?: { batchNo?: string } | null;
+    duplicateInbound?: { id: string; recordedAt: string } | null;
+  };
 };
 
 type UploadApiFail = { success: false; error?: string };
@@ -56,7 +63,13 @@ function formatRecordedAtForServer(v: unknown): string {
 
 function inboundDrawerValuesToFormData(values: InboundDrawerValues): FormData {
   const fd = new FormData();
-  const note = String(values.note ?? "").trim();
+  const uploaded = values.photo?.[0];
+  const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
+  const aiBatchNo =
+    response && response.success ? String(response.data.ai?.batchNo ?? "").trim() : "";
+  const rawNote = String(values.note ?? "").trim();
+  const batchLine = aiBatchNo ? `批次：${aiBatchNo}` : "";
+  const note = rawNote ? (batchLine ? `${batchLine}\n\n${rawNote}` : rawNote) : batchLine;
   fd.set("note", note);
   const ra = formatRecordedAtForServer(values.recordedAt);
   if (ra) fd.set("recordedAt", ra);
@@ -71,8 +84,6 @@ function inboundDrawerValuesToFormData(values: InboundDrawerValues): FormData {
     .filter((r) => r.skuId && Number.isInteger(r.quantity) && r.quantity > 0);
   fd.set("linesJson", JSON.stringify(lines));
 
-  const uploaded = values.photo?.[0];
-  const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
   const photoUrl = uploaded?.url ?? (response && response.success ? response.data.url : "");
   const photoMimeType =
     response && response.success && response.data.mimeType ? response.data.mimeType : "";
@@ -138,7 +149,7 @@ export function InboundListPageClient({ catalog, initialQ, initialProductId }: P
             accept="image/*"
             listType="picture"
             name="file"
-            action="/api/upload"
+            action="/api/upload?mode=inbound"
           >
             <Button>选择照片</Button>
           </Upload>
@@ -252,6 +263,13 @@ export function InboundListPageClient({ catalog, initialQ, initialProductId }: P
             {new Date(row.recordedAt).toLocaleString("zh-CN")}
           </span>
         ),
+      },
+      {
+        title: "批次",
+        dataIndex: "batchNo",
+        width: 130,
+        search: false,
+        render: (_, row) => row.batchNo ?? "—",
       },
       {
         title: "行数",
@@ -415,6 +433,17 @@ export function InboundListPageClient({ catalog, initialQ, initialProductId }: P
           }
           const uploadItem = values.photo?.[0];
           const uploadResponse = uploadItem?.response as UploadApiSuccess | UploadApiFail | undefined;
+          if (
+            uploadResponse &&
+            uploadResponse.success &&
+            uploadResponse.data.duplicateInbound
+          ) {
+            const t = new Date(uploadResponse.data.duplicateInbound.recordedAt).toLocaleString(
+              "zh-CN",
+            );
+            message.error(`该批次已登记（时间：${t}），请勿重复提交`);
+            return false;
+          }
           const uploadedUrl =
             uploadItem?.url ??
             (uploadResponse && uploadResponse.success ? uploadResponse.data.url : "");
