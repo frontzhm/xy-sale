@@ -1,0 +1,25 @@
+---
+description: 后台列表页与「新建」交互约定（ProTable、抽屉、Schema 表单）
+alwaysApply: true
+---
+
+# 表格列表页与新建入口（xy-sale）
+
+在 **`src/app/(dashboard)/`** 下新增或改版**以表格为主的业务列表页**时，默认采用下列模式（与「衣服档案」「入库登记」「厂家发货」等页面对齐）：
+
+## 列表
+
+- 使用 **Ant Design Pro** 的 **`ProTable`**（`@ant-design/pro-components`），服务端分页与筛选。
+- 列表数据通过 **`GET /api/<模块>/table`**（或同目录下等价的 `table/route.ts`）返回 `{ data, total, success, filterMeta? }`；客户端在 `request` 里 `fetch` 该地址并映射为 ProTable 所需结构。
+- URL 查询参数（如 `productId`、`q`）由 **服务端 `page.tsx`** 读取后作为 **initialValues / props** 传给客户端列表组件，并在请求 API 时一并带上。
+
+## 新建 / 登记类操作
+
+- 工具栏主按钮打开 **`Drawer`**，表单使用 **`BetaSchemaForm`**，且 **`layoutType="DrawerForm"`**（即官方文档中的 Schema 表单 + 抽屉形态）。
+- 提交保存使用 **Server Action**；列表内保存成功后应 **`revalidatePath`** 并 **`actionRef.reload()`**，**不要**在抽屉场景里 `redirect` 整页（可抽 `createXxxCore` + `createXxxInline` + 保留带 `redirect` 的 `createXxx` 供独立 `/new` 页使用）。
+- 独立全页 **`/模块/new`** 可保留作书签或兼容入口，与抽屉共用同一套写入逻辑。
+
+## 例外
+
+- 若页面明确不需要表格（纯详情、纯表单、报表图等），不必套用本规则。
+- 若产品明确要求其它交互（如全屏 Modal、多步向导），在实现中注明偏离原因即可。

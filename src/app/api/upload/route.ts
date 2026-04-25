@@ -1,16 +1,32 @@
 import { NextResponse } from "next/server";
 
-import { savePhotoBuffer } from "@/lib/storage/save-file";
+import { uploadImageToOss } from "@/lib/storage/oss";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const form = await request.formData();
-  const file = form.get("file");
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "缺少 file 字段" }, { status: 400 });
+  try {
+    const form = await request.formData();
+    const file = form.get("file");
+    if (!(file instanceof File)) {
+      return NextResponse.json({ success: false, error: "缺少 file 字段" }, { status: 400 });
+    }
+    if (file.size <= 0) {
+      return NextResponse.json({ success: false, error: "文件为空" }, { status: 400 });
+    }
+    if (!file.type.startsWith("image/")) {
+      return NextResponse.json({ success: false, error: "仅支持图片文件上传" }, { status: 400 });
+    }
+
+    const buf = Buffer.from(await file.arrayBuffer());
+    const uploaded = await uploadImageToOss(buf, file.name, file.type || null);
+
+    return NextResponse.json({
+      success: true,
+      data: uploaded,
+    });
+  } catch (error) {
+    console.error("upload image error:", error);
+    return NextResponse.json({ success: false, error: "上传失败，请稍后重试。" }, { status: 500 });
   }
-  const buf = Buffer.from(await file.arrayBuffer());
-  const { fileName, mimeType } = await savePhotoBuffer(buf, file.name);
-  return NextResponse.json({ fileName, mimeType });
 }

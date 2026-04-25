@@ -2,7 +2,7 @@
 
 import { BetaSchemaForm } from "@ant-design/pro-components";
 import type { ProFormColumnsType } from "@ant-design/pro-components";
-import { Button, Upload, message } from "antd";
+import { Button, Drawer, Spin, Upload, message } from "antd";
 import type { UploadFile } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { useMemo } from "react";
@@ -18,6 +18,13 @@ type InboundDrawerValues = {
   note?: string;
   lines?: { productId?: string; skuId?: string; quantity?: number }[];
 };
+
+type UploadApiSuccess = {
+  success: true;
+  data: { fileName: string; url: string; mimeType: string | null };
+};
+
+type UploadApiFail = { success: false; error?: string };
 
 function formatRecordedAtForServer(v: unknown): string {
   if (v == null || v === "") return "";
@@ -41,19 +48,31 @@ function inboundDrawerValuesToFormData(values: InboundDrawerValues): FormData {
     .filter((r) => r.skuId && Number.isInteger(r.quantity) && r.quantity > 0);
   fd.set("linesJson", JSON.stringify(lines));
 
-  const f = values.photo?.[0]?.originFileObj;
-  if (f) fd.set("photo", f);
+  const uploaded = values.photo?.[0];
+  const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
+  const photoUrl = uploaded?.url ?? (response && response.success ? response.data.url : "");
+  const photoMimeType =
+    response && response.success && response.data.mimeType ? response.data.mimeType : "";
+  if (photoUrl) {
+    fd.set("photoUrl", photoUrl);
+  }
+  if (photoMimeType) {
+    fd.set("photoMimeType", photoMimeType);
+  }
   return fd;
 }
 
 export function InboundRegistrationDrawer({
   open,
   onOpenChange,
+  catalogLoading,
   catalog,
   onAfterSubmit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 拉取 movement-catalog 时为 true；仅在抽屉内展示 Spin，避免按钮 loading 与空表单闪一下 */
+  catalogLoading: boolean;
   catalog: ShipmentCatalogProduct[];
   onAfterSubmit?: () => void;
 }) {
@@ -84,7 +103,13 @@ export function InboundRegistrationDrawer({
           getValueFromEvent: (e: { fileList?: UploadFile[] }) => e?.fileList ?? [],
         },
         renderFormItem: () => (
-          <Upload maxCount={1} accept="image/*" beforeUpload={() => false} listType="picture">
+          <Upload
+            maxCount={1}
+            accept="image/*"
+            listType="picture"
+            name="file"
+            action="/api/upload"
+          >
             <Button>选择照片</Button>
           </Upload>
         ),
@@ -165,44 +190,73 @@ export function InboundRegistrationDrawer({
   );
 
   return (
-    <BetaSchemaForm<InboundDrawerValues>
-      layoutType="DrawerForm"
+    <Drawer
       title="登记入库"
-      description="上传入库群里的照片并填写本次收到的 SKU 与件数；照片会保存到服务器存档。"
       open={open}
-      onOpenChange={onOpenChange}
-      grid
-      rowProps={{ gutter: [16, 8] }}
-      layout="horizontal"
-      labelCol={{ flex: "0 0 112px" }}
-      wrapperCol={{ flex: "1 1 auto" }}
-      labelAlign="right"
-      drawerProps={{ destroyOnClose: true, size: 720 }}
-      columns={drawerColumns}
-      initialValues={{
-        lines: [{}],
-      }}
-      submitter={{
-        searchConfig: { submitText: "保存入库登记", resetText: "取消" },
-        submitButtonProps: { disabled: !hasCatalog },
-        resetButtonProps: { onClick: () => onOpenChange(false) },
-      }}
-      onFinish={async (values) => {
-        if (!hasCatalog) {
-          message.warning("暂无带 SKU 的衣服档案，请先在上方维护档案。");
-          return false;
-        }
-        const fd = inboundDrawerValuesToFormData(values);
-        const r = await createInboundInline(fd);
-        if (r?.error) {
-          message.error(r.error);
-          return false;
-        }
-        message.success("已保存入库登记");
-        onAfterSubmit?.();
-        return true;
-      }}
-    />
+      onClose={() => onOpenChange(false)}
+      destroyOnHidden
+      size={720}
+      styles={{ body: { paddingTop: 12 } }}
+    >
+      {catalogLoading ? (
+        <div className="flex min-h-[280px] flex-col items-center justify-center gap-3">
+          <Spin size="large" />
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">正在加载衣服与 SKU 目录…</span>
+        </div>
+      ) : (
+        <>
+          <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+            上传入库群里的照片并填写本次收到的 SKU 与件数；照片会保存到服务器存档。
+          </p>
+          <BetaSchemaForm<InboundDrawerValues>
+            layoutType="Form"
+            grid
+            rowProps={{ gutter: [16, 8] }}
+            layout="horizontal"
+            labelCol={{ flex: "0 0 112px" }}
+            wrapperCol={{ flex: "1 1 auto" }}
+            labelAlign="right"
+            submitter={{
+              searchConfig: { submitText: "保存入库登记", resetText: "取消" },
+              submitButtonProps: { disabled: !hasCatalog },
+              resetButtonProps: { onClick: () => onOpenChange(false) },
+            }}
+            columns={drawerColumns}
+            initialValues={{
+              lines: [{}],
+            }}
+            onFinish={async (values) => {
+              if (!hasCatalog) {
+                message.warning("暂无带 SKU 的衣服档案，请先在上方维护档案。");
+                return false;
+              }
+              const uploadItem = values.photo?.[0];
+              const uploadResponse = uploadItem?.response as
+                | UploadApiSuccess
+                | UploadApiFail
+                | undefined;
+              const uploadedUrl =
+                uploadItem?.url ??
+                (uploadResponse && uploadResponse.success ? uploadResponse.data.url : "");
+              if (!uploadedUrl) {
+                message.error("请先等待图片上传完成");
+                return false;
+              }
+              const fd = inboundDrawerValuesToFormData(values);
+              const r = await createInboundInline(fd);
+              if (r?.error) {
+                message.error(r.error);
+                return false;
+              }
+              message.success("已保存入库登记");
+              onAfterSubmit?.();
+              onOpenChange(false);
+              return true;
+            }}
+          />
+        </>
+      )}
+    </Drawer>
   );
 }
 
@@ -233,20 +287,31 @@ function shipmentDrawerValuesToFormData(values: ShipmentDrawerValues): FormData 
     .filter((r) => r.skuId && Number.isInteger(r.quantity) && r.quantity > 0);
   fd.set("linesJson", JSON.stringify(lines));
 
-  const f = values.photo?.[0]?.originFileObj;
-  if (f) fd.set("photo", f);
+  const uploaded = values.photo?.[0];
+  const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
+  const photoUrl = uploaded?.url ?? (response && response.success ? response.data.url : "");
+  const photoMimeType =
+    response && response.success && response.data.mimeType ? response.data.mimeType : "";
+  if (photoUrl) {
+    fd.set("photoUrl", photoUrl);
+  }
+  if (photoMimeType) {
+    fd.set("photoMimeType", photoMimeType);
+  }
   return fd;
 }
 
 export function ShipmentRegistrationDrawer({
   open,
   onOpenChange,
+  catalogLoading,
   catalog,
   manufacturers,
   onAfterSubmit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  catalogLoading: boolean;
   catalog: ShipmentCatalogProduct[];
   manufacturers: ManufacturerOption[];
   onAfterSubmit?: () => void;
@@ -310,7 +375,13 @@ export function ShipmentRegistrationDrawer({
           getValueFromEvent: (e: { fileList?: UploadFile[] }) => e?.fileList ?? [],
         },
         renderFormItem: () => (
-          <Upload maxCount={1} accept="image/*" beforeUpload={() => false} listType="picture">
+          <Upload
+            maxCount={1}
+            accept="image/*"
+            listType="picture"
+            name="file"
+            action="/api/upload"
+          >
             <Button>选择照片</Button>
           </Upload>
         ),
@@ -391,44 +462,73 @@ export function ShipmentRegistrationDrawer({
   );
 
   return (
-    <BetaSchemaForm<ShipmentDrawerValues>
-      layoutType="DrawerForm"
+    <Drawer
       title="登记厂家发货"
-      description="上传群里的发货照片并填写本次发出的 SKU 与件数；照片会保存到服务器存档。"
       open={open}
-      onOpenChange={onOpenChange}
-      grid
-      rowProps={{ gutter: [16, 8] }}
-      layout="horizontal"
-      labelCol={{ flex: "0 0 112px" }}
-      wrapperCol={{ flex: "1 1 auto" }}
-      labelAlign="right"
-      drawerProps={{ destroyOnClose: true, size: 720 }}
-      columns={drawerColumns}
-      initialValues={{
-        lines: [{}],
-      }}
-      submitter={{
-        searchConfig: { submitText: "保存发货登记", resetText: "取消" },
-        submitButtonProps: { disabled: !hasCatalog },
-        resetButtonProps: { onClick: () => onOpenChange(false) },
-      }}
-      onFinish={async (values) => {
-        if (!hasCatalog) {
-          message.warning("暂无带 SKU 的衣服档案，请先在上方维护档案。");
-          return false;
-        }
-        const fd = shipmentDrawerValuesToFormData(values);
-        const r = await createShipmentInline(fd);
-        if (r?.error) {
-          message.error(r.error);
-          return false;
-        }
-        message.success("已保存发货登记");
-        onAfterSubmit?.();
-        return true;
-      }}
-    />
+      onClose={() => onOpenChange(false)}
+      destroyOnHidden
+      size={720}
+      styles={{ body: { paddingTop: 12 } }}
+    >
+      {catalogLoading ? (
+        <div className="flex min-h-[280px] flex-col items-center justify-center gap-3">
+          <Spin size="large" />
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">正在加载衣服与 SKU 目录…</span>
+        </div>
+      ) : (
+        <>
+          <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+            上传群里的发货照片并填写本次发出的 SKU 与件数；照片会保存到服务器存档。
+          </p>
+          <BetaSchemaForm<ShipmentDrawerValues>
+            layoutType="Form"
+            grid
+            rowProps={{ gutter: [16, 8] }}
+            layout="horizontal"
+            labelCol={{ flex: "0 0 112px" }}
+            wrapperCol={{ flex: "1 1 auto" }}
+            labelAlign="right"
+            submitter={{
+              searchConfig: { submitText: "保存发货登记", resetText: "取消" },
+              submitButtonProps: { disabled: !hasCatalog },
+              resetButtonProps: { onClick: () => onOpenChange(false) },
+            }}
+            columns={drawerColumns}
+            initialValues={{
+              lines: [{}],
+            }}
+            onFinish={async (values) => {
+              if (!hasCatalog) {
+                message.warning("暂无带 SKU 的衣服档案，请先在上方维护档案。");
+                return false;
+              }
+              const uploadItem = values.photo?.[0];
+              const uploadResponse = uploadItem?.response as
+                | UploadApiSuccess
+                | UploadApiFail
+                | undefined;
+              const uploadedUrl =
+                uploadItem?.url ??
+                (uploadResponse && uploadResponse.success ? uploadResponse.data.url : "");
+              if (!uploadedUrl) {
+                message.error("请先等待图片上传完成");
+                return false;
+              }
+              const fd = shipmentDrawerValuesToFormData(values);
+              const r = await createShipmentInline(fd);
+              if (r?.error) {
+                message.error(r.error);
+                return false;
+              }
+              message.success("已保存发货登记");
+              onAfterSubmit?.();
+              onOpenChange(false);
+              return true;
+            }}
+          />
+        </>
+      )}
+    </Drawer>
   );
 }
 

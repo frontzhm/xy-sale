@@ -24,6 +24,7 @@
     "@ant-design/pro-components": "^2.8.10",
     "@prisma/client": "^6.19.0",
     "ahooks": "^3.9.7",
+    "ali-oss": "^6.23.0",
     "antd": "^6.3.5",
     "dayjs": "^1.11.19",
     "next": "16.2.3",

@@ -56,7 +56,7 @@ xy-sale/
 | 路径 | 职责 |
 |------|------|
 | `lib/prisma.ts` | 单例 `PrismaClient` |
-| `lib/storage/*` | 照片保存、读取、`photoPublicUrl` |
+| `lib/storage/*` | 照片保存/读取、本地图片 URL、OSS 上传封装 |
 | `lib/reports/reconciliation.ts` | 订货/发货/入库按 `skuId` 聚合；厂家/衣服/单款汇总 |
 | `lib/orders/order-manufacturer.ts` | `$queryRaw` 读取 `Order.manufacturerId` |
 | `lib/format-datetime-local.ts` | 日期时间展示辅助 |
@@ -77,7 +77,7 @@ xy-sale/
 | 路径 | 说明 |
 |------|------|
 | `app/api/photos/[name]/route.ts` | `GET`：从 `storage/photos` 读照片 |
-| `app/api/upload/route.ts` | 上传相关（见实现） |
+| `app/api/upload/route.ts` | `POST`：接收 `file`（FormData）并上传到阿里云 OSS，返回 `fileName/url/mimeType` |
 | `app/api/products/table/route.ts` | `GET`：衣服档案 `ProTable` 分页与筛选 |
 | `app/api/inbound/table/route.ts` | `GET`：入库列表 `ProTable` 分页与 `filterMeta` |
 | `app/api/orders/table/route.ts` | `GET`：订货列表 `ProTable` 分页与 `filterMeta` |
@@ -98,8 +98,8 @@ pnpm build            # prebuild: prisma generate
 浏览器表单/页面
     → Server Actions 或 RSC 内 prisma 查询
     → Prisma → SQLite（或 PostgreSQL）
-    → 照片读写 → storage/photos
-    → 图片 URL → /api/photos/[name]
+    → 照片上传（可选）→ /api/upload → 阿里云 OSS
+    → 业务照片读写（现存逻辑）→ storage/photos → /api/photos/[name]
 ```
 
 ## 扩展与部署注意

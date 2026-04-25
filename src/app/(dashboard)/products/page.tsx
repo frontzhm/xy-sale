@@ -14,7 +14,7 @@ import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
 import isoWeek from "dayjs/plugin/isoWeek";
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createProductInline } from "./actions";
 import {
@@ -212,31 +212,54 @@ export default function ProductsPage() {
   const [movementCtx, setMovementCtx] = useState<MovementCatalogPayload | null>(null);
   const [inboundDrawerOpen, setInboundDrawerOpen] = useState(false);
   const [shipmentDrawerOpen, setShipmentDrawerOpen] = useState(false);
-  const [fetchingMovementKind, setFetchingMovementKind] = useState<"inbound" | "shipment" | null>(
-    null,
-  );
+  const [movementCatalogLoading, setMovementCatalogLoading] = useState(false);
+  const movementCtxRef = useRef<MovementCatalogPayload | null>(null);
+  const catalogInflightRef = useRef<Promise<void> | null>(null);
   const searchFormRef = useRef<ProFormInstance>(undefined);
   const actionRef = useRef<ActionType>(undefined);
 
-  async function openMovementDrawer(kind: "inbound" | "shipment") {
-    setFetchingMovementKind(kind);
-    try {
-      if (!movementCtx) {
+  useEffect(() => {
+    movementCtxRef.current = movementCtx;
+  }, [movementCtx]);
+
+  const ensureMovementCatalog = useCallback(async () => {
+    if (movementCtxRef.current) return;
+    if (catalogInflightRef.current) {
+      await catalogInflightRef.current;
+      return;
+    }
+    const p = (async () => {
+      setMovementCatalogLoading(true);
+      try {
         const res = await fetch("/api/products/movement-catalog");
         if (!res.ok) {
           const t = await res.text().catch(() => "");
-          message.error(t || "加载登记数据失败");
-          return;
+          throw new Error(t || "加载登记数据失败");
         }
         const j = (await res.json()) as MovementCatalogPayload;
+        movementCtxRef.current = j;
         setMovementCtx(j);
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : "加载登记数据失败，请稍后重试");
+        setInboundDrawerOpen(false);
+        setShipmentDrawerOpen(false);
+        throw e;
+      } finally {
+        setMovementCatalogLoading(false);
+        catalogInflightRef.current = null;
       }
-      if (kind === "inbound") setInboundDrawerOpen(true);
-      else setShipmentDrawerOpen(true);
+    })();
+    catalogInflightRef.current = p;
+    await p;
+  }, []);
+
+  async function openMovementDrawer(kind: "inbound" | "shipment") {
+    if (kind === "inbound") setInboundDrawerOpen(true);
+    else setShipmentDrawerOpen(true);
+    try {
+      await ensureMovementCatalog();
     } catch {
-      message.error("加载登记数据失败，请稍后重试");
-    } finally {
-      setFetchingMovementKind(null);
+      /* 错误提示与关抽屉已在 ensureMovementCatalog 中处理 */
     }
   }
 
@@ -698,7 +721,6 @@ export default function ProductsPage() {
               type="link"
               size="small"
               className="inline-flex h-auto items-center p-0 text-sm font-medium text-zinc-700 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-300 dark:hover:text-zinc-100"
-              loading={fetchingMovementKind === "inbound"}
               onClick={() => void openMovementDrawer("inbound")}
             >
               登记入库
@@ -708,7 +730,6 @@ export default function ProductsPage() {
               type="link"
               size="small"
               className="inline-flex h-auto items-center p-0 text-sm font-medium text-zinc-700 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-300 dark:hover:text-zinc-100"
-              loading={fetchingMovementKind === "shipment"}
               onClick={() => void openMovementDrawer("shipment")}
             >
               登记发货
@@ -763,6 +784,7 @@ export default function ProductsPage() {
       <InboundRegistrationDrawer
         open={inboundDrawerOpen}
         onOpenChange={setInboundDrawerOpen}
+        catalogLoading={movementCatalogLoading && !movementCtx}
         catalog={movementCtx?.catalog ?? []}
         onAfterSubmit={() => {
           actionRef.current?.reload?.();
@@ -772,6 +794,7 @@ export default function ProductsPage() {
       <ShipmentRegistrationDrawer
         open={shipmentDrawerOpen}
         onOpenChange={setShipmentDrawerOpen}
+        catalogLoading={movementCatalogLoading && !movementCtx}
         catalog={movementCtx?.catalog ?? []}
         manufacturers={movementCtx?.manufacturers ?? []}
         onAfterSubmit={() => {

@@ -61,13 +61,24 @@ async function createShipmentCore(formData: FormData): Promise<ShipmentFormState
     recordedAt = new Date();
   }
 
-  const image = formData.get("photo");
-  if (!(image instanceof File) || image.size === 0) {
-    return { error: "请上传发货照片。" };
+  const photoUrl = String(formData.get("photoUrl") ?? "").trim();
+  const photoMimeTypeFromUrlRaw = String(formData.get("photoMimeType") ?? "").trim();
+  const photoMimeTypeFromUrl = photoMimeTypeFromUrlRaw === "" ? null : photoMimeTypeFromUrlRaw;
+  let fileName = "";
+  let mimeType = "application/octet-stream";
+  if (photoUrl) {
+    fileName = photoUrl;
+    mimeType = photoMimeTypeFromUrl ?? "application/octet-stream";
+  } else {
+    const image = formData.get("photo");
+    if (!(image instanceof File) || image.size === 0) {
+      return { error: "请上传发货照片。" };
+    }
+    const buf = Buffer.from(await image.arrayBuffer());
+    const saved = await savePhotoBuffer(buf, image.name);
+    fileName = saved.fileName;
+    mimeType = saved.mimeType;
   }
-
-  const buf = Buffer.from(await image.arrayBuffer());
-  const { fileName, mimeType } = await savePhotoBuffer(buf, image.name);
 
   const linesParsed = parseLinesJson(String(formData.get("linesJson") ?? "[]"));
   if (!linesParsed.ok) return { error: linesParsed.error };
@@ -164,10 +175,16 @@ export async function updateShipment(
     recordedAt = existing.recordedAt;
   }
 
+  const photoUrl = String(formData.get("photoUrl") ?? "").trim();
+  const photoMimeTypeFromUrlRaw = String(formData.get("photoMimeType") ?? "").trim();
+  const photoMimeTypeFromUrl = photoMimeTypeFromUrlRaw === "" ? null : photoMimeTypeFromUrlRaw;
   const image = formData.get("photo");
   let photoFileName = existing.photoFileName;
   let photoMimeType = existing.photoMimeType;
-  if (image instanceof File && image.size > 0) {
+  if (photoUrl) {
+    photoFileName = photoUrl;
+    photoMimeType = photoMimeTypeFromUrl ?? "application/octet-stream";
+  } else if (image instanceof File && image.size > 0) {
     const buf = Buffer.from(await image.arrayBuffer());
     const saved = await savePhotoBuffer(buf, image.name);
     photoFileName = saved.fileName;

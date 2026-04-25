@@ -41,6 +41,13 @@ type InboundDrawerValues = {
   lines?: { productId?: string; skuId?: string; quantity?: number }[];
 };
 
+type UploadApiSuccess = {
+  success: true;
+  data: { fileName: string; url: string; mimeType: string | null };
+};
+
+type UploadApiFail = { success: false; error?: string };
+
 function formatRecordedAtForServer(v: unknown): string {
   if (v == null || v === "") return "";
   if (dayjs.isDayjs(v)) return v.toISOString();
@@ -64,8 +71,17 @@ function inboundDrawerValuesToFormData(values: InboundDrawerValues): FormData {
     .filter((r) => r.skuId && Number.isInteger(r.quantity) && r.quantity > 0);
   fd.set("linesJson", JSON.stringify(lines));
 
-  const f = values.photo?.[0]?.originFileObj;
-  if (f) fd.set("photo", f);
+  const uploaded = values.photo?.[0];
+  const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
+  const photoUrl = uploaded?.url ?? (response && response.success ? response.data.url : "");
+  const photoMimeType =
+    response && response.success && response.data.mimeType ? response.data.mimeType : "";
+  if (photoUrl) {
+    fd.set("photoUrl", photoUrl);
+  }
+  if (photoMimeType) {
+    fd.set("photoMimeType", photoMimeType);
+  }
   return fd;
 }
 
@@ -117,7 +133,13 @@ export function InboundListPageClient({ catalog, initialQ, initialProductId }: P
           getValueFromEvent: (e: { fileList?: UploadFile[] }) => e?.fileList ?? [],
         },
         renderFormItem: () => (
-          <Upload maxCount={1} accept="image/*" beforeUpload={() => false} listType="picture">
+          <Upload
+            maxCount={1}
+            accept="image/*"
+            listType="picture"
+            name="file"
+            action="/api/upload"
+          >
             <Button>选择照片</Button>
           </Upload>
         ),
@@ -389,6 +411,15 @@ export function InboundListPageClient({ catalog, initialQ, initialProductId }: P
         onFinish={async (values) => {
           if (!hasCatalog) {
             message.warning("暂无带 SKU 的衣服档案，请先到「衣服档案」维护。");
+            return false;
+          }
+          const uploadItem = values.photo?.[0];
+          const uploadResponse = uploadItem?.response as UploadApiSuccess | UploadApiFail | undefined;
+          const uploadedUrl =
+            uploadItem?.url ??
+            (uploadResponse && uploadResponse.success ? uploadResponse.data.url : "");
+          if (!uploadedUrl) {
+            message.error("请先等待图片上传完成");
             return false;
           }
           const fd = inboundDrawerValuesToFormData(values);
