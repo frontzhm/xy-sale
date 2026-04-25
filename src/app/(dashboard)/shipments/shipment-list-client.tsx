@@ -8,7 +8,7 @@ import type {
   ProFormInstance,
 } from "@ant-design/pro-components";
 import { useDebounceFn } from "ahooks";
-import { Button, Upload, message } from "antd";
+import { Button, Modal, Upload, message } from "antd";
 import type { UploadFile } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import Link from "next/link";
@@ -40,10 +40,24 @@ type ShipmentDrawerValues = {
   manufacturerId?: string;
   newManufacturerName?: string;
   photo?: UploadFile[];
+  orderNo?: string;
   recordedAt?: Dayjs;
   note?: string;
   lines?: { productId?: string; skuId?: string; quantity?: number }[];
 };
+
+type UploadApiSuccess = {
+  success: true;
+  data: {
+    fileName: string;
+    url: string;
+    mimeType: string | null;
+    ai?: { orderNo?: string } | null;
+    duplicateShipment?: { id: string; recordedAt: string } | null;
+  };
+};
+
+type UploadApiFail = { success: false; error?: string };
 
 function formatRecordedAtForServer(v: unknown): string {
   if (v == null || v === "") return "";
@@ -55,7 +69,14 @@ function shipmentDrawerValuesToFormData(values: ShipmentDrawerValues): FormData 
   const fd = new FormData();
   fd.set("manufacturerId", String(values.manufacturerId ?? "").trim());
   fd.set("newManufacturerName", String(values.newManufacturerName ?? "").trim());
-  const note = String(values.note ?? "").trim();
+  const uploaded = values.photo?.[0];
+  const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
+  const aiOrderNo =
+    String(values.orderNo ?? "").trim() ||
+    (response && response.success ? String(response.data.ai?.orderNo ?? "").trim() : "");
+  const note = [aiOrderNo ? `单号：${aiOrderNo}` : "", String(values.note ?? "").trim()]
+    .filter((x) => x)
+    .join("\n\n");
   fd.set("note", note);
   const ra = formatRecordedAtForServer(values.recordedAt);
   if (ra) fd.set("recordedAt", ra);
@@ -70,8 +91,15 @@ function shipmentDrawerValuesToFormData(values: ShipmentDrawerValues): FormData 
     .filter((r) => r.skuId && Number.isInteger(r.quantity) && r.quantity > 0);
   fd.set("linesJson", JSON.stringify(lines));
 
-  const f = values.photo?.[0]?.originFileObj;
-  if (f) fd.set("photo", f);
+  const photoUrl = uploaded?.url ?? (response && response.success ? response.data.url : "");
+  const photoMimeType =
+    response && response.success && response.data.mimeType ? response.data.mimeType : "";
+  if (photoUrl) {
+    fd.set("photoUrl", photoUrl);
+  }
+  if (photoMimeType) {
+    fd.set("photoMimeType", photoMimeType);
+  }
   return fd;
 }
 
@@ -91,7 +119,9 @@ export function ShipmentListPageClient({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [filterMeta, setFilterMeta] = useState<ShipmentTableFilterMeta | null>(null);
   const searchFormRef = useRef<ProFormInstance>(undefined);
+  const drawerFormRef = useRef<ProFormInstance>(undefined);
   const actionRef = useRef<ActionType>(undefined);
+  const [lastAiUrl, setLastAiUrl] = useState("");
 
   const productIdForApi = initialProductId?.trim() || undefined;
 
@@ -161,10 +191,26 @@ export function ShipmentListPageClient({
           getValueFromEvent: (e: { fileList?: UploadFile[] }) => e?.fileList ?? [],
         },
         renderFormItem: () => (
-          <Upload maxCount={1} accept="image/*" beforeUpload={() => false} listType="picture">
+          <Upload
+            maxCount={1}
+            accept="image/*"
+            listType="picture"
+            name="file"
+            action="/api/upload?mode=shipment"
+          >
             <Button>选择照片</Button>
           </Upload>
         ),
+      },
+      {
+        title: "订单号",
+        dataIndex: "orderNo",
+        valueType: "text",
+        colProps: { span: 24 },
+        formItemProps: {
+          rules: [{ required: true, message: "请填写订单号" }],
+        },
+        fieldProps: { placeholder: "必填，如：110A-4A01" },
       },
       {
         title: "登记时间",
@@ -424,6 +470,7 @@ export function ShipmentListPageClient({
       </div>
 
       <BetaSchemaForm<ShipmentDrawerValues>
+        formRef={drawerFormRef}
         layoutType="DrawerForm"
         title="登记厂家发货"
         description="上传群里的发货照片并填写本次发出的 SKU 与件数；照片会保存到服务器存档。"
@@ -450,6 +497,30 @@ export function ShipmentListPageClient({
             message.warning("暂无带 SKU 的衣服档案，请先到「衣服档案」维护。");
             return false;
           }
+          const uploadItem = values.photo?.[0];
+          const uploadResponse = uploadItem?.response as UploadApiSuccess | UploadApiFail | undefined;
+          if (
+            uploadResponse &&
+            uploadResponse.success &&
+            uploadResponse.data.duplicateShipment
+          ) {
+            const t = new Date(uploadResponse.data.duplicateShipment.recordedAt).toLocaleString(
+              "zh-CN",
+            );
+            message.error(`该单号已登记（时间：${t}），请勿重复提交`);
+            return false;
+          }
+          const uploadedUrl =
+            uploadItem?.url ??
+            (uploadResponse && uploadResponse.success ? uploadResponse.data.url : "");
+          if (!uploadedUrl) {
+            message.error("请先等待图片上传完成");
+            return false;
+          }
+          if (!String(values.orderNo ?? "").trim()) {
+            message.error("请填写订单号");
+            return false;
+          }
           const fd = shipmentDrawerValuesToFormData(values);
           const r = await createShipmentInline(fd);
           if (r?.error) {
@@ -459,6 +530,23 @@ export function ShipmentListPageClient({
           message.success("已保存发货登记");
           actionRef.current?.reload?.();
           return true;
+        }}
+        onValuesChange={(_, allValues) => {
+          const uploadItem = (allValues as ShipmentDrawerValues).photo?.[0];
+          const uploadResponse = uploadItem?.response as UploadApiSuccess | UploadApiFail | undefined;
+          if (!uploadResponse || !uploadResponse.success) return;
+          if (uploadResponse.data.url === lastAiUrl) return;
+          setLastAiUrl(uploadResponse.data.url);
+          const aiOrderNo = String(uploadResponse.data.ai?.orderNo ?? "").trim();
+          if (!aiOrderNo) {
+            Modal.warning({
+              title: "请确认该图片是发货图片",
+              content: "未识别到订单号。发货登记要求订单号必填，请核对图片后手动填写订单号。",
+            });
+            return;
+          }
+          // 仅回填订单号，不覆盖其它人工输入
+          drawerFormRef.current?.setFieldsValue?.({ orderNo: aiOrderNo });
         }}
       />
     </div>

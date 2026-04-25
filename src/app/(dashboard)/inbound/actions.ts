@@ -33,7 +33,7 @@ function parseLinesJson(raw: string): { ok: true; lines: LinePayload[] } | { ok:
       const q = Number((item as { quantity?: unknown }).quantity);
       if (!Number.isInteger(q) || q <= 0) continue;
       const canUseSku = !!skuId;
-      const canUseName = !!(productName && color && size);
+      const canUseName = !!(productName && color);
       if (!canUseSku && !canUseName) continue;
       const key = canUseSku ? `sku:${skuId}` : `name:${productName}\0${color}\0${size}`;
       if (seenKey.has(key)) {
@@ -49,7 +49,7 @@ function parseLinesJson(raw: string): { ok: true; lines: LinePayload[] } | { ok:
       });
     }
     if (lines.length === 0) {
-      return { ok: false, error: "请至少添加一行有效的入库明细（衣服名称+颜色+尺码+件数）。" };
+      return { ok: false, error: "请至少添加一行有效的入库明细（衣服名称+颜色+件数）。" };
     }
     return { ok: true, lines };
   } catch {
@@ -59,6 +59,30 @@ function parseLinesJson(raw: string): { ok: true; lines: LinePayload[] } | { ok:
 
 function normalizeName(s: string): string {
   return s.trim().replace(/\s+/g, " ");
+}
+
+function normalizeBatchNo(v: string): string {
+  return v.trim().replace(/\s+/g, "").toLowerCase();
+}
+
+function extractBatchNoFromNote(note: string | null): string | null {
+  if (!note) return null;
+  const m = note.match(/批次[:：]\s*([^\n\r]+)/);
+  if (!m?.[1]) return null;
+  const n = normalizeBatchNo(m[1]);
+  return n || null;
+}
+
+async function existsInboundBatch(batchNoRaw: string): Promise<boolean> {
+  const target = normalizeBatchNo(batchNoRaw);
+  if (!target) return false;
+  const rows = await prisma.inboundRecord.findMany({
+    where: { note: { contains: "批次" } },
+    select: { note: true },
+    orderBy: { createdAt: "desc" },
+    take: 1000,
+  });
+  return rows.some((r) => extractBatchNoFromNote(r.note) === target);
 }
 
 async function resolveOrCreateInboundSkuId(args: {
@@ -74,8 +98,8 @@ async function resolveOrCreateInboundSkuId(args: {
   const productName = normalizeName(line.productName ?? "");
   const color = normalizeName(line.color ?? "");
   const size = normalizeName(line.size ?? "");
-  if (!productName || !color || !size) {
-    return { ok: false, error: "明细缺少衣服名称、颜色或尺码。" };
+  if (!productName || !color) {
+    return { ok: false, error: "明细缺少衣服名称或颜色。" };
   }
 
   let product = await prisma.product.findFirst({
@@ -113,6 +137,13 @@ async function resolveOrCreateInboundSkuId(args: {
 async function createInboundCore(formData: FormData): Promise<InboundFormState> {
   const noteRaw = String(formData.get("note") ?? "").trim();
   const note = noteRaw === "" ? null : noteRaw;
+  const batchNo = extractBatchNoFromNote(note);
+  if (batchNo) {
+    const duplicated = await existsInboundBatch(batchNo);
+    if (duplicated) {
+      return { error: "该批次已登记，请勿重复提交。" };
+    }
+  }
 
   const recordedAtRaw = String(formData.get("recordedAt") ?? "").trim();
   let recordedAt: Date;
@@ -129,20 +160,23 @@ async function createInboundCore(formData: FormData): Promise<InboundFormState> 
   const photoUrl = String(formData.get("photoUrl") ?? "").trim();
   const photoMimeTypeFromUrlRaw = String(formData.get("photoMimeType") ?? "").trim();
   const photoMimeTypeFromUrl = photoMimeTypeFromUrlRaw === "" ? null : photoMimeTypeFromUrlRaw;
-  let fileName = "";
-  let mimeType = "application/octet-stream";
+  let photos: Array<{ fileName: string; mimeType: string }> = [];
   if (photoUrl) {
-    fileName = photoUrl;
-    mimeType = photoMimeTypeFromUrl ?? "application/octet-stream";
+    photos = [{ fileName: photoUrl, mimeType: photoMimeTypeFromUrl ?? "application/octet-stream" }];
   } else {
-    const image = formData.get("photo");
-    if (!(image instanceof File) || image.size === 0) {
+    const files = formData
+      .getAll("photo")
+      .filter((x): x is File => x instanceof File && x.size > 0);
+    if (files.length === 0) {
       return { error: "请上传入库照片。" };
     }
-    const buf = Buffer.from(await image.arrayBuffer());
-    const saved = await savePhotoBuffer(buf, image.name);
-    fileName = saved.fileName;
-    mimeType = saved.mimeType;
+    photos = await Promise.all(
+      files.map(async (image) => {
+        const buf = Buffer.from(await image.arrayBuffer());
+        const saved = await savePhotoBuffer(buf, image.name);
+        return { fileName: saved.fileName, mimeType: saved.mimeType };
+      }),
+    );
   }
 
   const linesParsed = parseLinesJson(String(formData.get("linesJson") ?? "[]"));
@@ -157,20 +191,24 @@ async function createInboundCore(formData: FormData): Promise<InboundFormState> 
   }
 
   try {
-    await prisma.inboundRecord.create({
-      data: {
-        photoFileName: fileName,
-        photoMimeType: mimeType,
-        note,
-        recordedAt,
-        lines: {
-          create: resolved.map((l) => ({
-            skuId: l.skuId,
-            quantity: l.quantity,
-          })),
-        },
-      },
-    });
+    await prisma.$transaction(
+      photos.map((p) =>
+        prisma.inboundRecord.create({
+          data: {
+            photoFileName: p.fileName,
+            photoMimeType: p.mimeType,
+            note,
+            recordedAt,
+            lines: {
+              create: resolved.map((l) => ({
+                skuId: l.skuId,
+                quantity: l.quantity,
+              })),
+            },
+          },
+        }),
+      ),
+    );
   } catch (e) {
     console.error(e);
     return { error: "保存失败，请稍后重试。" };

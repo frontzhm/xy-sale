@@ -6,6 +6,18 @@ import { uploadImageToOss } from "@/lib/storage/oss";
 
 export const runtime = "nodejs";
 
+function normalizeBatchNo(v: string): string {
+  return v.trim().replace(/\s+/g, "").toLowerCase();
+}
+
+function extractBatchNoFromNote(note: string | null): string | null {
+  if (!note) return null;
+  const m = note.match(/批次[:：]\s*([^\n\r]+)/);
+  if (!m?.[1]) return null;
+  const n = normalizeBatchNo(m[1]);
+  return n || null;
+}
+
 export async function POST(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -60,13 +72,16 @@ export async function POST(request: Request) {
         if (mode === "inbound") {
           const batchNo = String(ai?.batchNo ?? "").trim();
           if (batchNo) {
-            const duplicated = await prisma.inboundRecord.findFirst({
+            const target = normalizeBatchNo(batchNo);
+            const candidates = await prisma.inboundRecord.findMany({
               where: {
-                note: { contains: `批次：${batchNo}` },
+                note: { contains: "批次" },
               },
-              select: { id: true, recordedAt: true },
+              select: { id: true, recordedAt: true, note: true },
               orderBy: { createdAt: "desc" },
+              take: 300,
             });
+            const duplicated = candidates.find((r) => extractBatchNoFromNote(r.note) === target);
             if (duplicated) {
               duplicateInbound = {
                 id: duplicated.id,

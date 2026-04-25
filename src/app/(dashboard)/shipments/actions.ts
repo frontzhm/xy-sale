@@ -33,7 +33,7 @@ function parseLinesJson(raw: string): { ok: true; lines: LinePayload[] } | { ok:
       const q = Number((item as { quantity?: unknown }).quantity);
       if (!Number.isInteger(q) || q <= 0) continue;
       const canUseSku = !!skuId;
-      const canUseName = !!(productName && color && size);
+      const canUseName = !!(productName && color);
       if (!canUseSku && !canUseName) continue;
       const key = canUseSku ? `sku:${skuId}` : `name:${productName}\0${color}\0${size}`;
       if (seenKey.has(key)) {
@@ -49,7 +49,7 @@ function parseLinesJson(raw: string): { ok: true; lines: LinePayload[] } | { ok:
       });
     }
     if (lines.length === 0) {
-      return { ok: false, error: "请至少添加一行有效的发货明细（衣服名称+颜色+尺码+件数）。" };
+      return { ok: false, error: "请至少添加一行有效的发货明细（衣服名称+颜色+件数）。" };
     }
     return { ok: true, lines };
   } catch {
@@ -75,8 +75,8 @@ async function resolveOrCreateShipmentSkuId(args: {
   const productName = normalizeName(line.productName ?? "");
   const color = normalizeName(line.color ?? "");
   const size = normalizeName(line.size ?? "");
-  if (!productName || !color || !size) {
-    return { ok: false, error: "明细缺少衣服名称、颜色或尺码。" };
+  if (!productName || !color) {
+    return { ok: false, error: "明细缺少衣服名称或颜色。" };
   }
 
   let product = await prisma.product.findFirst({
@@ -143,20 +143,23 @@ async function createShipmentCore(formData: FormData): Promise<ShipmentFormState
   const photoUrl = String(formData.get("photoUrl") ?? "").trim();
   const photoMimeTypeFromUrlRaw = String(formData.get("photoMimeType") ?? "").trim();
   const photoMimeTypeFromUrl = photoMimeTypeFromUrlRaw === "" ? null : photoMimeTypeFromUrlRaw;
-  let fileName = "";
-  let mimeType = "application/octet-stream";
+  let photos: Array<{ fileName: string; mimeType: string }> = [];
   if (photoUrl) {
-    fileName = photoUrl;
-    mimeType = photoMimeTypeFromUrl ?? "application/octet-stream";
+    photos = [{ fileName: photoUrl, mimeType: photoMimeTypeFromUrl ?? "application/octet-stream" }];
   } else {
-    const image = formData.get("photo");
-    if (!(image instanceof File) || image.size === 0) {
+    const files = formData
+      .getAll("photo")
+      .filter((x): x is File => x instanceof File && x.size > 0);
+    if (files.length === 0) {
       return { error: "请上传发货照片。" };
     }
-    const buf = Buffer.from(await image.arrayBuffer());
-    const saved = await savePhotoBuffer(buf, image.name);
-    fileName = saved.fileName;
-    mimeType = saved.mimeType;
+    photos = await Promise.all(
+      files.map(async (image) => {
+        const buf = Buffer.from(await image.arrayBuffer());
+        const saved = await savePhotoBuffer(buf, image.name);
+        return { fileName: saved.fileName, mimeType: saved.mimeType };
+      }),
+    );
   }
 
   const linesParsed = parseLinesJson(String(formData.get("linesJson") ?? "[]"));
@@ -171,21 +174,25 @@ async function createShipmentCore(formData: FormData): Promise<ShipmentFormState
   }
 
   try {
-    await prisma.shipmentRecord.create({
-      data: {
-        manufacturerId,
-        photoFileName: fileName,
-        photoMimeType: mimeType,
-        note,
-        recordedAt,
-        lines: {
-          create: resolved.map((l) => ({
-            skuId: l.skuId,
-            quantity: l.quantity,
-          })),
-        },
-      },
-    });
+    await prisma.$transaction(
+      photos.map((p) =>
+        prisma.shipmentRecord.create({
+          data: {
+            manufacturerId,
+            photoFileName: p.fileName,
+            photoMimeType: p.mimeType,
+            note,
+            recordedAt,
+            lines: {
+              create: resolved.map((l) => ({
+                skuId: l.skuId,
+                quantity: l.quantity,
+              })),
+            },
+          },
+        }),
+      ),
+    );
   } catch (e) {
     console.error(e);
     return { error: "保存失败，请稍后重试。" };

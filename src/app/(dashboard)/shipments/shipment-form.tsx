@@ -137,6 +137,7 @@ export function ShipmentForm({
             name="photo"
             type="file"
             accept="image/*"
+            multiple={!isEdit}
             required={!isEdit}
             className="mt-1 block w-full text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-zinc-900 dark:text-zinc-400 dark:file:bg-zinc-800 dark:file:text-zinc-100"
             onChange={(e) => {

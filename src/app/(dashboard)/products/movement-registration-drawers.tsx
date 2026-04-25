@@ -2,7 +2,7 @@
 
 import { BetaSchemaForm } from "@ant-design/pro-components";
 import type { ProFormColumnsType, ProFormInstance } from "@ant-design/pro-components";
-import { Button, Drawer, Spin, Upload, message } from "antd";
+import { Button, Drawer, Select, Spin, Upload, message } from "antd";
 import type { UploadFile } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { useMemo, useRef, useState } from "react";
@@ -14,6 +14,7 @@ import type { ManufacturerOption } from "./product-form";
 
 type InboundDrawerValues = {
   photo?: UploadFile[];
+  batchNo?: string;
   recordedAt?: Dayjs;
   note?: string;
   lines?: { productName?: string; color?: string; size?: string; quantity?: number }[];
@@ -76,12 +77,31 @@ function buildLineSummaryNote(
   return [`总件数：${total}件`, ...linesText].join("\n");
 }
 
-function inboundDrawerValuesToFormData(values: InboundDrawerValues): FormData {
+function getUploadedItems(files?: UploadFile[]): UploadFile[] {
+  return (files ?? []).filter((f) => {
+    const response = f.response as UploadApiSuccess | UploadApiFail | undefined;
+    const url = f.url ?? (response && response.success ? response.data.url : "");
+    return !!url;
+  });
+}
+
+function getUploadSuccess(item?: UploadFile): UploadApiSuccess["data"] | null {
+  const response = item?.response as UploadApiSuccess | UploadApiFail | undefined;
+  if (!response || !response.success) return null;
+  return response.data;
+}
+
+function getPhotoKey(item: UploadFile): string {
+  const data = getUploadSuccess(item);
+  return data?.url || item.url || item.uid;
+}
+
+function inboundDrawerValuesToFormData(values: InboundDrawerValues, uploaded?: UploadFile): FormData {
   const fd = new FormData();
-  const uploaded = values.photo?.[0];
   const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
   const aiBatchNo =
-    response && response.success ? String(response.data.ai?.batchNo ?? "").trim() : "";
+    String(values.batchNo ?? "").trim() ||
+    (response && response.success ? String(response.data.ai?.batchNo ?? "").trim() : "");
   const summaryNote = buildLineSummaryNote(values.lines ?? []);
   const batchLine = aiBatchNo ? `批次：${aiBatchNo}` : "";
   const rawNote = String(values.note ?? "").trim();
@@ -100,7 +120,7 @@ function inboundDrawerValuesToFormData(values: InboundDrawerValues): FormData {
       const quantity = typeof q === "number" ? q : Number.parseInt(String(q ?? ""), 10);
       return { productName, color, size, quantity };
     })
-    .filter((r) => r.productName && r.color && r.size && Number.isInteger(r.quantity) && r.quantity > 0);
+    .filter((r) => r.productName && r.color && Number.isInteger(r.quantity) && r.quantity > 0);
   fd.set("linesJson", JSON.stringify(lines));
 
   const photoUrl = uploaded?.url ?? (response && response.success ? response.data.url : "");
@@ -184,7 +204,7 @@ function mapAiLinesToFormLines(
     const fallbackName = row.productLabel?.trim() || "";
     const fallbackColor = row.color?.trim() || "";
     const fallbackSize = row.size?.trim() || "";
-    if (fallbackName && fallbackColor && fallbackSize) {
+    if (fallbackName && fallbackColor) {
       rows.push({
         productName: fallbackName,
         color: fallbackColor,
@@ -211,7 +231,34 @@ export function InboundRegistrationDrawer({
   onAfterSubmit?: () => void;
 }) {
   const formRef = useRef<ProFormInstance>(undefined);
-  const [lastAiUrl, setLastAiUrl] = useState<string>("");
+  const [activePhotoKey, setActivePhotoKey] = useState<string>("");
+  const [submitMode, setSubmitMode] = useState<"current" | "all">("all");
+  const [photoItems, setPhotoItems] = useState<UploadFile[]>([]);
+  const [draftByPhotoKey, setDraftByPhotoKey] = useState<Record<string, Partial<InboundDrawerValues>>>(
+    {},
+  );
+
+  const buildInboundDraftFromItem = (item: UploadFile): Partial<InboundDrawerValues> => {
+    const data = getUploadSuccess(item);
+    const ai = data?.ai;
+    if (!ai) return {};
+    const mapped = mapAiLinesToFormLines(ai.lines, catalog);
+    const summaryFromAi = buildLineSummaryNote(
+      mapped.map((x) => ({ productName: x.productName, quantity: x.quantity })),
+    );
+    const aiNote = String(ai.note ?? "").trim();
+    const aiBatchNo = String(ai.batchNo ?? "").trim();
+    const batchLine = aiBatchNo ? `批次：${aiBatchNo}` : "";
+    const noteCore = [batchLine, summaryFromAi].filter((x) => x).join("\n");
+    const d = ai.recordedAt ? dayjs(ai.recordedAt) : null;
+
+    return {
+      batchNo: aiBatchNo || undefined,
+      note: noteCore || aiNote ? (aiNote ? (noteCore ? `${noteCore}\n\n${aiNote}` : aiNote) : noteCore) : "",
+      recordedAt: d?.isValid() ? d : undefined,
+      lines: mapped.length > 0 ? mapped : [{}],
+    };
+  };
 
   const drawerColumns = useMemo<ProFormColumnsType<InboundDrawerValues>[]>(
     () => [
@@ -227,7 +274,8 @@ export function InboundRegistrationDrawer({
         },
         renderFormItem: () => (
           <Upload
-            maxCount={1}
+            maxCount={20}
+            multiple
             accept="image/*"
             listType="picture"
             name="file"
@@ -236,6 +284,16 @@ export function InboundRegistrationDrawer({
             <Button>选择照片</Button>
           </Upload>
         ),
+      },
+      {
+        title: "批次",
+        dataIndex: "batchNo",
+        valueType: "text",
+        colProps: { span: 24 },
+        formItemProps: {
+          rules: [{ required: true, message: "请填写批次" }],
+        },
+        fieldProps: { placeholder: "必填，如：674" },
       },
       {
         title: "登记时间",
@@ -290,7 +348,7 @@ export function InboundRegistrationDrawer({
                 dataIndex: "size",
                 valueType: "text",
                 colProps: { span: 6 },
-                fieldProps: { placeholder: "如：L" },
+                fieldProps: { placeholder: "尺码可空，如：L" },
               },
               {
                 title: "",
@@ -336,89 +394,157 @@ export function InboundRegistrationDrawer({
             wrapperCol={{ flex: "1 1 auto" }}
             labelAlign="right"
             submitter={{
-              searchConfig: { submitText: "保存入库登记", resetText: "取消" },
-              submitButtonProps: {},
+              searchConfig: { submitText: "保存全部图片", resetText: "取消" },
+              submitButtonProps: { onClick: () => setSubmitMode("all") },
               resetButtonProps: { onClick: () => onOpenChange(false) },
+              render: (_, dom) => [
+                <Button
+                  key="save-current"
+                  type="default"
+                  onClick={() => {
+                    setSubmitMode("current");
+                    formRef.current?.submit?.();
+                  }}
+                >
+                  保存当前图片
+                </Button>,
+                ...dom,
+              ],
             }}
             columns={drawerColumns}
             initialValues={{
               lines: [{}],
             }}
             onFinish={async (values) => {
-              const uploadItem = values.photo?.[0];
-              const uploadResponse = uploadItem?.response as
-                | UploadApiSuccess
-                | UploadApiFail
-                | undefined;
-              if (
-                uploadResponse &&
-                uploadResponse.success &&
-                uploadResponse.data.duplicateInbound
-              ) {
-                const t = new Date(uploadResponse.data.duplicateInbound.recordedAt).toLocaleString(
-                  "zh-CN",
-                );
-                message.error(`该批次已登记（时间：${t}），请勿重复提交`);
-                return false;
-              }
-              const uploadedUrl =
-                uploadItem?.url ??
-                (uploadResponse && uploadResponse.success ? uploadResponse.data.url : "");
-              if (!uploadedUrl) {
+              const uploadedItems = getUploadedItems(values.photo);
+              if (uploadedItems.length === 0) {
                 message.error("请先等待图片上传完成");
                 return false;
               }
-              const fd = inboundDrawerValuesToFormData(values);
-              const r = await createInboundInline(fd);
-              if (r?.error) {
-                message.error(r.error);
+              const targetItems =
+                submitMode === "current"
+                  ? uploadedItems.filter((x) => getPhotoKey(x) === activePhotoKey).slice(0, 1)
+                  : uploadedItems;
+              if (targetItems.length === 0) {
+                message.error("请先选择要保存的图片");
                 return false;
               }
-              message.success("已保存入库登记");
+              let success = 0;
+              let failed = 0;
+              for (const item of targetItems) {
+                const key = getPhotoKey(item);
+                const data = getUploadSuccess(item);
+                if (!data) {
+                  failed++;
+                  continue;
+                }
+                if (data.duplicateInbound) {
+                  failed++;
+                  continue;
+                }
+                const rowValues: InboundDrawerValues =
+                  submitMode === "current"
+                    ? { ...values, photo: [item] }
+                    : { ...buildInboundDraftFromItem(item), ...draftByPhotoKey[key], photo: [item] };
+                if (!String(rowValues.batchNo ?? "").trim()) {
+                  failed++;
+                  continue;
+                }
+                const lines = (rowValues.lines ?? []).filter(
+                  (r) => String(r?.productName ?? "").trim() && String(r?.color ?? "").trim() && Number(r?.quantity) > 0,
+                );
+                if (lines.length === 0) {
+                  failed++;
+                  continue;
+                }
+                const fd = inboundDrawerValuesToFormData({ ...rowValues, lines }, item);
+                const r = await createInboundInline(fd);
+                if (r?.error) failed++;
+                else success++;
+              }
+              if (success === 0) {
+                message.error(
+                  submitMode === "current" ? "当前图片保存失败" : "批量保存失败：请检查批次与明细",
+                );
+                return false;
+              }
+              message.success(
+                submitMode === "current"
+                  ? failed > 0
+                    ? "当前图片已保存（部分校验未通过）"
+                    : "当前图片已保存"
+                  : failed > 0
+                    ? `批量完成：成功 ${success}，失败 ${failed}`
+                    : `批量完成：成功 ${success}`,
+              );
               onAfterSubmit?.();
               onOpenChange(false);
               return true;
             }}
             onValuesChange={(_, allValues) => {
-              const uploadItem = (allValues as InboundDrawerValues).photo?.[0];
-              const uploadResponse = uploadItem?.response as
-                | UploadApiSuccess
-                | UploadApiFail
-                | undefined;
-              if (!uploadResponse || !uploadResponse.success) return;
-              if (!uploadResponse.data.ai) return;
-              if (uploadResponse.data.url === lastAiUrl) return;
-              setLastAiUrl(uploadResponse.data.url);
-              const ai = uploadResponse.data.ai;
-              const mapped = mapAiLinesToFormLines(ai.lines, catalog);
-              const patch: Record<string, unknown> = {};
-              if (mapped.length > 0) {
-                patch.lines = mapped.map((x) => ({
-                  productName: x.productName,
-                  color: x.color,
-                  size: x.size,
-                  quantity: x.quantity,
-                }));
-              }
-              const summaryFromAi = buildLineSummaryNote(
-                mapped.map((x) => ({ productName: x.productName, quantity: x.quantity })),
-              );
-              const aiNote = String(ai.note ?? "").trim();
-              const aiBatchNo = String(ai.batchNo ?? "").trim();
-              const batchLine = aiBatchNo ? `批次：${aiBatchNo}` : "";
-              const noteCore = [batchLine, summaryFromAi].filter((x) => x).join("\n");
-              if (noteCore || aiNote) {
-                patch.note = aiNote ? (noteCore ? `${noteCore}\n\n${aiNote}` : aiNote) : noteCore;
-              }
-              if (ai.recordedAt) {
-                const d = dayjs(ai.recordedAt);
-                if (d.isValid()) patch.recordedAt = d;
-              }
-              if (Object.keys(patch).length > 0) {
-                formRef.current?.setFieldsValue(patch);
+              const v = allValues as InboundDrawerValues;
+              const uploadedItems = getUploadedItems(v.photo);
+              setPhotoItems(uploadedItems);
+              const nextKeys = new Set(uploadedItems.map(getPhotoKey));
+              setDraftByPhotoKey((prev) => {
+                const next: Record<string, Partial<InboundDrawerValues>> = {};
+                for (const [k, val] of Object.entries(prev)) {
+                  if (nextKeys.has(k)) next[k] = val;
+                }
+                for (const item of uploadedItems) {
+                  const key = getPhotoKey(item);
+                  if (!next[key]) next[key] = buildInboundDraftFromItem(item);
+                }
+                const activeKey = activePhotoKey || (uploadedItems[0] ? getPhotoKey(uploadedItems[0]) : "");
+                if (activeKey) {
+                  next[activeKey] = {
+                    ...next[activeKey],
+                    batchNo: v.batchNo,
+                    recordedAt: v.recordedAt,
+                    note: v.note,
+                    lines: v.lines,
+                  };
+                }
+                return next;
+              });
+              if (!activePhotoKey && uploadedItems[0]) {
+                const k = getPhotoKey(uploadedItems[0]);
+                setActivePhotoKey(k);
+                const patch = buildInboundDraftFromItem(uploadedItems[0]);
+                if (Object.keys(patch).length > 0) formRef.current?.setFieldsValue(patch);
               }
             }}
           />
+          {(() => {
+            const uploadedItems = photoItems;
+            if (uploadedItems.length <= 1) return null;
+            const options = uploadedItems.map((item, idx) => ({
+              label: `图片 ${idx + 1}`,
+              value: getPhotoKey(item),
+            }));
+            return (
+              <div className="mt-3 flex items-center gap-2">
+                <span className="text-sm text-zinc-500 dark:text-zinc-400">当前编辑：</span>
+                <Select
+                  style={{ minWidth: 220 }}
+                  value={activePhotoKey || options[0]?.value}
+                  options={options}
+                  onChange={(nextKey) => {
+                    setActivePhotoKey(nextKey);
+                    const patch = draftByPhotoKey[nextKey];
+                    if (patch) {
+                      formRef.current?.setFieldsValue({
+                        batchNo: patch.batchNo,
+                        recordedAt: patch.recordedAt,
+                        note: patch.note,
+                        lines: patch.lines,
+                      });
+                    }
+                  }}
+                />
+              </div>
+            );
+          })()}
         </>
       )}
     </Drawer>
@@ -429,19 +555,20 @@ type ShipmentDrawerValues = {
   manufacturerId?: string;
   newManufacturerName?: string;
   photo?: UploadFile[];
+  orderNo?: string;
   recordedAt?: Dayjs;
   note?: string;
   lines?: { productName?: string; color?: string; size?: string; quantity?: number }[];
 };
 
-function shipmentDrawerValuesToFormData(values: ShipmentDrawerValues): FormData {
+function shipmentDrawerValuesToFormData(values: ShipmentDrawerValues, uploaded?: UploadFile): FormData {
   const fd = new FormData();
   fd.set("manufacturerId", String(values.manufacturerId ?? "").trim());
   fd.set("newManufacturerName", String(values.newManufacturerName ?? "").trim());
-  const uploaded = values.photo?.[0];
   const response = uploaded?.response as UploadApiSuccess | UploadApiFail | undefined;
   const aiOrderNo =
-    response && response.success ? String(response.data.ai?.orderNo ?? "").trim() : "";
+    String(values.orderNo ?? "").trim() ||
+    (response && response.success ? String(response.data.ai?.orderNo ?? "").trim() : "");
   const summaryNote = buildLineSummaryNote(values.lines ?? []);
   const orderNoLine = aiOrderNo ? `单号：${aiOrderNo}` : "";
   const noteCore = [orderNoLine, summaryNote].filter((x) => x).join("\n");
@@ -460,7 +587,7 @@ function shipmentDrawerValuesToFormData(values: ShipmentDrawerValues): FormData 
       const quantity = typeof q === "number" ? q : Number.parseInt(String(q ?? ""), 10);
       return { productName, color, size, quantity };
     })
-    .filter((r) => r.productName && r.color && r.size && Number.isInteger(r.quantity) && r.quantity > 0);
+    .filter((r) => r.productName && r.color && Number.isInteger(r.quantity) && r.quantity > 0);
   fd.set("linesJson", JSON.stringify(lines));
 
   const photoUrl = uploaded?.url ?? (response && response.success ? response.data.url : "");
@@ -491,7 +618,38 @@ export function ShipmentRegistrationDrawer({
   onAfterSubmit?: () => void;
 }) {
   const formRef = useRef<ProFormInstance>(undefined);
-  const [lastAiUrl, setLastAiUrl] = useState<string>("");
+  const [activePhotoKey, setActivePhotoKey] = useState<string>("");
+  const [submitMode, setSubmitMode] = useState<"current" | "all">("all");
+  const [photoItems, setPhotoItems] = useState<UploadFile[]>([]);
+  const [draftByPhotoKey, setDraftByPhotoKey] = useState<Record<string, Partial<ShipmentDrawerValues>>>(
+    {},
+  );
+
+  const buildShipmentDraftFromItem = (item: UploadFile): Partial<ShipmentDrawerValues> => {
+    const data = getUploadSuccess(item);
+    const ai = data?.ai;
+    if (!ai) return {};
+    const mapped = mapAiLinesToFormLines(ai.lines, catalog);
+    const summaryFromAi = buildLineSummaryNote(
+      mapped.map((x) => ({ productName: x.productName, quantity: x.quantity })),
+    );
+    const aiNote = String(ai.note ?? "").trim();
+    const aiOrderNo = String(ai.orderNo ?? "").trim();
+    const orderNoLine = aiOrderNo ? `单号：${aiOrderNo}` : "";
+    const noteCore = [orderNoLine, summaryFromAi].filter((x) => x).join("\n");
+    const d = ai.recordedAt ? dayjs(ai.recordedAt) : null;
+    const matchedId = ai.manufacturerName
+      ? bestMatchManufacturerId(ai.manufacturerName, manufacturers)
+      : null;
+    return {
+      manufacturerId: matchedId ?? "",
+      newManufacturerName: matchedId ? "" : String(ai.manufacturerName ?? "").trim(),
+      orderNo: aiOrderNo || undefined,
+      note: noteCore || aiNote ? (aiNote ? (noteCore ? `${noteCore}\n\n${aiNote}` : aiNote) : noteCore) : "",
+      recordedAt: d?.isValid() ? d : undefined,
+      lines: mapped.length > 0 ? mapped : [{}],
+    };
+  };
 
   const mfrOptions = useMemo(
     () => manufacturers.map((m) => ({ label: m.name, value: m.id })),
@@ -539,7 +697,8 @@ export function ShipmentRegistrationDrawer({
         },
         renderFormItem: () => (
           <Upload
-            maxCount={1}
+            maxCount={20}
+            multiple
             accept="image/*"
             listType="picture"
             name="file"
@@ -558,6 +717,16 @@ export function ShipmentRegistrationDrawer({
           style: { width: "100%", maxWidth: 360 },
           placeholder: "留空则使用保存时当前时间",
         },
+      },
+      {
+        title: "订单号",
+        dataIndex: "orderNo",
+        valueType: "text",
+        colProps: { span: 24 },
+        formItemProps: {
+          rules: [{ required: true, message: "请填写订单号" }],
+        },
+        fieldProps: { placeholder: "必填，如：110A-4A01" },
       },
       {
         title: "备注",
@@ -602,7 +771,7 @@ export function ShipmentRegistrationDrawer({
                 dataIndex: "size",
                 valueType: "text",
                 colProps: { span: 6 },
-                fieldProps: { placeholder: "如：L" },
+                fieldProps: { placeholder: "尺码可空，如：L" },
               },
               {
                 title: "",
@@ -648,99 +817,156 @@ export function ShipmentRegistrationDrawer({
             wrapperCol={{ flex: "1 1 auto" }}
             labelAlign="right"
             submitter={{
-              searchConfig: { submitText: "保存发货登记", resetText: "取消" },
-              submitButtonProps: {},
+              searchConfig: { submitText: "保存全部图片", resetText: "取消" },
+              submitButtonProps: { onClick: () => setSubmitMode("all") },
               resetButtonProps: { onClick: () => onOpenChange(false) },
+              render: (_, dom) => [
+                <Button
+                  key="save-current"
+                  type="default"
+                  onClick={() => {
+                    setSubmitMode("current");
+                    formRef.current?.submit?.();
+                  }}
+                >
+                  保存当前图片
+                </Button>,
+                ...dom,
+              ],
             }}
             columns={drawerColumns}
             initialValues={{
               lines: [{}],
             }}
             onFinish={async (values) => {
-              const uploadItem = values.photo?.[0];
-              const uploadResponse = uploadItem?.response as
-                | UploadApiSuccess
-                | UploadApiFail
-                | undefined;
-              if (
-                uploadResponse &&
-                uploadResponse.success &&
-                uploadResponse.data.duplicateShipment
-              ) {
-                const t = new Date(uploadResponse.data.duplicateShipment.recordedAt).toLocaleString(
-                  "zh-CN",
-                );
-                message.error(`该单号已登记（时间：${t}），请勿重复提交`);
-                return false;
-              }
-              const uploadedUrl =
-                uploadItem?.url ??
-                (uploadResponse && uploadResponse.success ? uploadResponse.data.url : "");
-              if (!uploadedUrl) {
+              const uploadedItems = getUploadedItems(values.photo);
+              if (uploadedItems.length === 0) {
                 message.error("请先等待图片上传完成");
                 return false;
               }
-              const fd = shipmentDrawerValuesToFormData(values);
-              const r = await createShipmentInline(fd);
-              if (r?.error) {
-                message.error(r.error);
+              const targetItems =
+                submitMode === "current"
+                  ? uploadedItems.filter((x) => getPhotoKey(x) === activePhotoKey).slice(0, 1)
+                  : uploadedItems;
+              if (targetItems.length === 0) {
+                message.error("请先选择要保存的图片");
                 return false;
               }
-              message.success("已保存发货登记");
+              let success = 0;
+              let failed = 0;
+              for (const item of targetItems) {
+                const key = getPhotoKey(item);
+                const data = getUploadSuccess(item);
+                if (!data) {
+                  failed++;
+                  continue;
+                }
+                if (data.duplicateShipment) {
+                  failed++;
+                  continue;
+                }
+                const rowValues: ShipmentDrawerValues =
+                  submitMode === "current"
+                    ? { ...values, photo: [item] }
+                    : { ...buildShipmentDraftFromItem(item), ...draftByPhotoKey[key], photo: [item] };
+                if (!String(rowValues.orderNo ?? "").trim()) {
+                  failed++;
+                  continue;
+                }
+                const lines = (rowValues.lines ?? []).filter(
+                  (r) => String(r?.productName ?? "").trim() && String(r?.color ?? "").trim() && Number(r?.quantity) > 0,
+                );
+                if (lines.length === 0) {
+                  failed++;
+                  continue;
+                }
+                const fd = shipmentDrawerValuesToFormData({ ...rowValues, lines }, item);
+                const r = await createShipmentInline(fd);
+                if (r?.error) failed++;
+                else success++;
+              }
+              if (success === 0) {
+                message.error(
+                  submitMode === "current" ? "当前图片保存失败" : "批量保存失败：请检查订单号与明细",
+                );
+                return false;
+              }
+              message.success(
+                submitMode === "current"
+                  ? failed > 0
+                    ? "当前图片已保存（部分校验未通过）"
+                    : "当前图片已保存"
+                  : failed > 0
+                    ? `批量完成：成功 ${success}，失败 ${failed}`
+                    : `批量完成：成功 ${success}`,
+              );
               onAfterSubmit?.();
               onOpenChange(false);
               return true;
             }}
             onValuesChange={(_, allValues) => {
-              const uploadItem = (allValues as ShipmentDrawerValues).photo?.[0];
-              const uploadResponse = uploadItem?.response as
-                | UploadApiSuccess
-                | UploadApiFail
-                | undefined;
-              if (!uploadResponse || !uploadResponse.success) return;
-              if (!uploadResponse.data.ai) return;
-              if (uploadResponse.data.url === lastAiUrl) return;
-              setLastAiUrl(uploadResponse.data.url);
-              const ai = uploadResponse.data.ai;
-              const mapped = mapAiLinesToFormLines(ai.lines, catalog);
-              const patch: Record<string, unknown> = {};
-              if (mapped.length > 0) {
-                patch.lines = mapped.map((x) => ({
-                  productName: x.productName,
-                  color: x.color,
-                  size: x.size,
-                  quantity: x.quantity,
-                }));
-              }
-              const summaryFromAi = buildLineSummaryNote(
-                mapped.map((x) => ({ productName: x.productName, quantity: x.quantity })),
-              );
-              const aiNote = String(ai.note ?? "").trim();
-              const aiOrderNo = String(ai.orderNo ?? "").trim();
-              const orderNoLine = aiOrderNo ? `单号：${aiOrderNo}` : "";
-              const noteCore = [orderNoLine, summaryFromAi].filter((x) => x).join("\n");
-              if (noteCore || aiNote) {
-                patch.note = aiNote ? (noteCore ? `${noteCore}\n\n${aiNote}` : aiNote) : noteCore;
-              }
-              if (ai.recordedAt) {
-                const d = dayjs(ai.recordedAt);
-                if (d.isValid()) patch.recordedAt = d;
-              }
-              if (ai.manufacturerName) {
-                const matchedId = bestMatchManufacturerId(ai.manufacturerName, manufacturers);
-                if (matchedId) {
-                  patch.manufacturerId = matchedId;
-                  patch.newManufacturerName = "";
-                } else {
-                  patch.manufacturerId = "";
-                  patch.newManufacturerName = ai.manufacturerName;
+              const v = allValues as ShipmentDrawerValues;
+              const uploadedItems = getUploadedItems(v.photo);
+              setPhotoItems(uploadedItems);
+              const nextKeys = new Set(uploadedItems.map(getPhotoKey));
+              setDraftByPhotoKey((prev) => {
+                const next: Record<string, Partial<ShipmentDrawerValues>> = {};
+                for (const [k, val] of Object.entries(prev)) {
+                  if (nextKeys.has(k)) next[k] = val;
                 }
-              }
-              if (Object.keys(patch).length > 0) {
-                formRef.current?.setFieldsValue(patch);
+                for (const item of uploadedItems) {
+                  const key = getPhotoKey(item);
+                  if (!next[key]) next[key] = buildShipmentDraftFromItem(item);
+                }
+                const activeKey = activePhotoKey || (uploadedItems[0] ? getPhotoKey(uploadedItems[0]) : "");
+                if (activeKey) {
+                  next[activeKey] = {
+                    ...next[activeKey],
+                    manufacturerId: v.manufacturerId,
+                    newManufacturerName: v.newManufacturerName,
+                    orderNo: v.orderNo,
+                    recordedAt: v.recordedAt,
+                    note: v.note,
+                    lines: v.lines,
+                  };
+                }
+                return next;
+              });
+              if (!activePhotoKey && uploadedItems[0]) {
+                const k = getPhotoKey(uploadedItems[0]);
+                setActivePhotoKey(k);
+                const patch = buildShipmentDraftFromItem(uploadedItems[0]);
+                if (Object.keys(patch).length > 0) formRef.current?.setFieldsValue(patch);
               }
             }}
           />
+          {photoItems.length > 1 ? (
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-sm text-zinc-500 dark:text-zinc-400">当前编辑：</span>
+              <Select
+                style={{ minWidth: 220 }}
+                value={activePhotoKey || getPhotoKey(photoItems[0])}
+                options={photoItems.map((item, idx) => ({
+                  label: `图片 ${idx + 1}`,
+                  value: getPhotoKey(item),
+                }))}
+                onChange={(nextKey) => {
+                  setActivePhotoKey(nextKey);
+                  const patch = draftByPhotoKey[nextKey];
+                  if (patch) {
+                    formRef.current?.setFieldsValue({
+                      manufacturerId: patch.manufacturerId,
+                      newManufacturerName: patch.newManufacturerName,
+                      orderNo: patch.orderNo,
+                      recordedAt: patch.recordedAt,
+                      note: patch.note,
+                      lines: patch.lines,
+                    });
+                  }
+                }}
+              />
+            </div>
+          ) : null}
         </>
       )}
     </Drawer>
