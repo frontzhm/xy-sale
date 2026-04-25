@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 
+import { parseImageWithMoonshot } from "@/lib/ai/moonshot-image-parse";
 import { uploadImageToOss } from "@/lib/storage/oss";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File)) {
@@ -20,10 +22,33 @@ export async function POST(request: Request) {
 
     const buf = Buffer.from(await file.arrayBuffer());
     const uploaded = await uploadImageToOss(buf, file.name, file.type || null);
+    const modeRaw = String(searchParams.get("mode") ?? form.get("mode") ?? "")
+      .trim()
+      .toLowerCase();
+    const mode = modeRaw === "shipment" ? "shipment" : modeRaw === "inbound" ? "inbound" : null;
+    const imageDataUrl = `data:${file.type || "image/jpeg"};base64,${buf.toString("base64")}`;
+    let ai = null;
+    let aiError: string | null = null;
+    if (mode) {
+      try {
+        ai = await parseImageWithMoonshot({
+          imageUrl: uploaded.url,
+          imageDataUrl,
+          mode,
+        });
+      } catch (error) {
+        console.error("moonshot parse error:", error);
+        aiError = error instanceof Error ? error.message : String(error);
+      }
+    }
 
     return NextResponse.json({
       success: true,
-      data: uploaded,
+      data: {
+        ...uploaded,
+        ai,
+        aiError,
+      },
     });
   } catch (error) {
     console.error("upload image error:", error);

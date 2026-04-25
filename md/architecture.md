@@ -77,7 +77,7 @@ xy-sale/
 | 路径 | 说明 |
 |------|------|
 | `app/api/photos/[name]/route.ts` | `GET`：从 `storage/photos` 读照片 |
-| `app/api/upload/route.ts` | `POST`：接收 `file`（FormData）并上传到阿里云 OSS，返回 `fileName/url/mimeType` |
+| `app/api/upload/route.ts` | `POST`：接收 `file`（FormData）并上传到阿里云 OSS；可带 `mode=inbound/shipment` 调用 Moonshot 识图并返回结构化表单建议 |
 | `app/api/products/table/route.ts` | `GET`：衣服档案 `ProTable` 分页与筛选 |
 | `app/api/inbound/table/route.ts` | `GET`：入库列表 `ProTable` 分页与 `filterMeta` |
 | `app/api/orders/table/route.ts` | `GET`：订货列表 `ProTable` 分页与 `filterMeta` |
@@ -96,9 +96,9 @@ pnpm build            # prebuild: prisma generate
 
 ```
 浏览器表单/页面
+    → 上传图片（可选带 mode）→ /api/upload → OSS（可选 Moonshot 识图）
     → Server Actions 或 RSC 内 prisma 查询
     → Prisma → SQLite（或 PostgreSQL）
-    → 照片上传（可选）→ /api/upload → 阿里云 OSS
     → 业务照片读写（现存逻辑）→ storage/photos → /api/photos/[name]
 ```
 

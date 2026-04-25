@@ -1,11 +1,11 @@
 "use client";
 
 import { BetaSchemaForm } from "@ant-design/pro-components";
-import type { ProFormColumnsType } from "@ant-design/pro-components";
+import type { ProFormColumnsType, ProFormInstance } from "@ant-design/pro-components";
 import { Button, Drawer, Spin, Upload, message } from "antd";
 import type { UploadFile } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { createInboundInline } from "../inbound/actions";
 import { createShipmentInline } from "../shipments/actions";
@@ -21,7 +21,23 @@ type InboundDrawerValues = {
 
 type UploadApiSuccess = {
   success: true;
-  data: { fileName: string; url: string; mimeType: string | null };
+  data: {
+    fileName: string;
+    url: string;
+    mimeType: string | null;
+    ai?: {
+      note?: string;
+      recordedAt?: string;
+      manufacturerName?: string;
+      lines?: {
+        productLabel?: string;
+        skuLabel?: string;
+        color?: string;
+        size?: string;
+        quantity?: number;
+      }[];
+    } | null;
+  };
 };
 
 type UploadApiFail = { success: false; error?: string };
@@ -62,6 +78,48 @@ function inboundDrawerValuesToFormData(values: InboundDrawerValues): FormData {
   return fd;
 }
 
+function norm(s: string): string {
+  return s.replace(/\s+/g, "").toLowerCase();
+}
+
+function mapAiLinesToFormLines(
+  aiLines: NonNullable<UploadApiSuccess["data"]["ai"]>["lines"],
+  catalog: ShipmentCatalogProduct[],
+): { productId: string; skuId: string; quantity: number }[] {
+  if (!aiLines || aiLines.length === 0) return [];
+  const rows: { productId: string; skuId: string; quantity: number }[] = [];
+  for (const row of aiLines) {
+    const q = Number(row.quantity);
+    if (!Number.isFinite(q) || q <= 0) continue;
+    const skuLabel = row.skuLabel ? norm(row.skuLabel) : "";
+    const color = row.color ? norm(row.color) : "";
+    const size = row.size ? norm(row.size) : "";
+    const productLabel = row.productLabel ? norm(row.productLabel) : "";
+    let hit: { productId: string; skuId: string } | null = null;
+    for (const p of catalog) {
+      if (
+        productLabel &&
+        !norm(p.label).includes(productLabel) &&
+        !productLabel.includes(norm(p.label))
+      ) {
+        continue;
+      }
+      for (const s of p.skus) {
+        const sNorm = norm(s.label);
+        const bySkuLabel = skuLabel && (sNorm.includes(skuLabel) || skuLabel.includes(sNorm));
+        const byColorSize = color && size && sNorm.includes(color) && sNorm.includes(size);
+        if (bySkuLabel || byColorSize) {
+          hit = { productId: p.id, skuId: s.id };
+          break;
+        }
+      }
+      if (hit) break;
+    }
+    if (hit) rows.push({ ...hit, quantity: Math.max(1, Math.round(q)) });
+  }
+  return rows;
+}
+
 export function InboundRegistrationDrawer({
   open,
   onOpenChange,
@@ -76,6 +134,8 @@ export function InboundRegistrationDrawer({
   catalog: ShipmentCatalogProduct[];
   onAfterSubmit?: () => void;
 }) {
+  const formRef = useRef<ProFormInstance>(undefined);
+  const [lastAiUrl, setLastAiUrl] = useState<string>("");
   const hasCatalog = useMemo(() => catalog.some((p) => p.skus.length > 0), [catalog]);
 
   const productOptions = useMemo(
@@ -108,7 +168,7 @@ export function InboundRegistrationDrawer({
             accept="image/*"
             listType="picture"
             name="file"
-            action="/api/upload"
+            action="/api/upload?mode=inbound"
           >
             <Button>选择照片</Button>
           </Upload>
@@ -209,6 +269,7 @@ export function InboundRegistrationDrawer({
             上传入库群里的照片并填写本次收到的 SKU 与件数；照片会保存到服务器存档。
           </p>
           <BetaSchemaForm<InboundDrawerValues>
+            formRef={formRef}
             layoutType="Form"
             grid
             rowProps={{ gutter: [16, 8] }}
@@ -252,6 +313,35 @@ export function InboundRegistrationDrawer({
               onAfterSubmit?.();
               onOpenChange(false);
               return true;
+            }}
+            onValuesChange={(_, allValues) => {
+              const uploadItem = (allValues as InboundDrawerValues).photo?.[0];
+              const uploadResponse = uploadItem?.response as
+                | UploadApiSuccess
+                | UploadApiFail
+                | undefined;
+              if (!uploadResponse || !uploadResponse.success) return;
+              if (!uploadResponse.data.ai) return;
+              if (uploadResponse.data.url === lastAiUrl) return;
+              setLastAiUrl(uploadResponse.data.url);
+              const ai = uploadResponse.data.ai;
+              const mapped = mapAiLinesToFormLines(ai.lines, catalog);
+              const patch: Record<string, unknown> = {};
+              if (mapped.length > 0) {
+                patch.lines = mapped.map((x) => ({
+                  productId: x.productId,
+                  skuId: x.skuId,
+                  quantity: x.quantity,
+                }));
+              }
+              if (ai.note) patch.note = ai.note;
+              if (ai.recordedAt) {
+                const d = dayjs(ai.recordedAt);
+                if (d.isValid()) patch.recordedAt = d;
+              }
+              if (Object.keys(patch).length > 0) {
+                formRef.current?.setFieldsValue(patch);
+              }
             }}
           />
         </>
@@ -316,6 +406,8 @@ export function ShipmentRegistrationDrawer({
   manufacturers: ManufacturerOption[];
   onAfterSubmit?: () => void;
 }) {
+  const formRef = useRef<ProFormInstance>(undefined);
+  const [lastAiUrl, setLastAiUrl] = useState<string>("");
   const hasCatalog = useMemo(() => catalog.some((p) => p.skus.length > 0), [catalog]);
 
   const mfrOptions = useMemo(
@@ -380,7 +472,7 @@ export function ShipmentRegistrationDrawer({
             accept="image/*"
             listType="picture"
             name="file"
-            action="/api/upload"
+            action="/api/upload?mode=shipment"
           >
             <Button>选择照片</Button>
           </Upload>
@@ -481,6 +573,7 @@ export function ShipmentRegistrationDrawer({
             上传群里的发货照片并填写本次发出的 SKU 与件数；照片会保存到服务器存档。
           </p>
           <BetaSchemaForm<ShipmentDrawerValues>
+            formRef={formRef}
             layoutType="Form"
             grid
             rowProps={{ gutter: [16, 8] }}
@@ -524,6 +617,44 @@ export function ShipmentRegistrationDrawer({
               onAfterSubmit?.();
               onOpenChange(false);
               return true;
+            }}
+            onValuesChange={(_, allValues) => {
+              const uploadItem = (allValues as ShipmentDrawerValues).photo?.[0];
+              const uploadResponse = uploadItem?.response as
+                | UploadApiSuccess
+                | UploadApiFail
+                | undefined;
+              if (!uploadResponse || !uploadResponse.success) return;
+              if (!uploadResponse.data.ai) return;
+              if (uploadResponse.data.url === lastAiUrl) return;
+              setLastAiUrl(uploadResponse.data.url);
+              const ai = uploadResponse.data.ai;
+              const mapped = mapAiLinesToFormLines(ai.lines, catalog);
+              const patch: Record<string, unknown> = {};
+              if (mapped.length > 0) {
+                patch.lines = mapped.map((x) => ({
+                  productId: x.productId,
+                  skuId: x.skuId,
+                  quantity: x.quantity,
+                }));
+              }
+              if (ai.note) patch.note = ai.note;
+              if (ai.recordedAt) {
+                const d = dayjs(ai.recordedAt);
+                if (d.isValid()) patch.recordedAt = d;
+              }
+              if (ai.manufacturerName) {
+                const exact = manufacturers.find((m) => norm(m.name) === norm(ai.manufacturerName ?? ""));
+                if (exact) {
+                  patch.manufacturerId = exact.id;
+                  patch.newManufacturerName = "";
+                } else {
+                  patch.newManufacturerName = ai.manufacturerName;
+                }
+              }
+              if (Object.keys(patch).length > 0) {
+                formRef.current?.setFieldsValue(patch);
+              }
             }}
           />
         </>
