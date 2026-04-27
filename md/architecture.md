@@ -60,6 +60,7 @@ xy-sale/
 | `lib/reports/reconciliation.ts` | 订货/发货/入库按 `skuId` 聚合；厂家/衣服/单款汇总 |
 | `lib/orders/order-manufacturer.ts` | `$queryRaw` 读取 `Order.manufacturerId` |
 | `lib/format-datetime-local.ts` | 日期时间展示辅助 |
+| `lib/wechat/jssdk.ts` | 微信 `access_token/jsapi_ticket` 缓存与 JSSDK 签名生成 |
 
 ## Server Actions
 
@@ -84,6 +85,7 @@ xy-sale/
 | `app/api/inbound/table/route.ts` | `GET`：入库列表 `ProTable` 分页与 `filterMeta` |
 | `app/api/orders/table/route.ts` | `GET`：订货列表 `ProTable` 分页与 `filterMeta` |
 | `app/api/shipments/table/route.ts` | `GET`：厂家发货列表 `ProTable` 分页与 `filterMeta` |
+| `app/api/wechat/jssdk-sign/route.ts` | `GET`：按页面 URL 生成微信 JSSDK 签名（供前端 `wx.config`） |
 
 ## 构建与数据库脚本
 
