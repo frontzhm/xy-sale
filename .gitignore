@@ -51,3 +51,4 @@ next-env.d.ts
 
 # 上传的照片（对货存档）
 /storage
+/demo-images
