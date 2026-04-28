@@ -8,7 +8,7 @@ import type {
   ProFormInstance,
 } from "@ant-design/pro-components";
 import { useDebounceFn, useRequest } from "ahooks";
-import { Button, Space, Upload, message } from "antd";
+import { Button, Modal, Space, Upload, message } from "antd";
 import type { UploadFile } from "antd";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
@@ -16,7 +16,7 @@ import isoWeek from "dayjs/plugin/isoWeek";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { createProductInline } from "./actions";
+import { createProductInline, deleteProductInline } from "./actions";
 import {
   InboundRegistrationDrawer,
   ShipmentRegistrationDrawer,
@@ -424,6 +424,18 @@ export default function ProductsPage() {
   const columns = useMemo<ProColumns<ProductTableRow>[]>(
     () => [
       {
+        title: "入库日期",
+        dataIndex: "inboundDateRange",
+        hideInTable: true,
+        valueType: "dateRange",
+        colSize: 4,
+        fieldProps: {
+          allowClear: true,
+          placeholder: ["开始日期", "结束日期"],
+          presets: INBOUND_DATE_RANGE_PRESETS,
+        },
+      },
+      {
         title: "入库名称",
         dataIndex: "searchNameInbound",
         hideInTable: true,
@@ -449,39 +461,10 @@ export default function ProductsPage() {
         hideInTable: true,
         fieldProps: { placeholder: "模糊匹配材质" },
       },
+      
+      
       {
-        title: "入库日期",
-        dataIndex: "inboundDateRange",
-        hideInTable: true,
-        valueType: "dateRange",
-        colSize: 1.25,
-        fieldProps: {
-          allowClear: true,
-          placeholder: ["开始日期", "结束日期"],
-          presets: INBOUND_DATE_RANGE_PRESETS,
-        },
-      },
-      {
-        title: "主图",
-        dataIndex: "imageFileName",
-        width: 88,
-        search: false,
-        render: (_, row) =>
-          row.imageFileName ? (
-            // eslint-disable-next-line @next/next/no-img-element -- 本地 API 动态地址
-            <img
-              src={photoPublicUrl(row.imageFileName)}
-              alt=""
-              className="h-12 w-12 rounded-md border border-zinc-200 object-cover dark:border-zinc-700"
-            />
-          ) : (
-            <span className="inline-flex h-12 w-12 items-center justify-center rounded-md border border-dashed border-zinc-300 text-xs text-zinc-400 dark:border-zinc-600">
-              无
-            </span>
-          ),
-      },
-      {
-        title: "入库名称",
+        title: "衣服入库名称",
         dataIndex: "nameInbound",
         ellipsis: true,
         width: 160,
@@ -493,36 +476,6 @@ export default function ProductsPage() {
         ellipsis: true,
         width: 120,
         search: false,
-      },
-      // {
-      //   title: "材质",
-      //   dataIndex: "material",
-      //   ellipsis: true,
-      //   width: 88,
-      //   search: false,
-      //   render: (_, row) => row.material ?? "—",
-      // },
-      // {
-      //   title: "SKU",
-      //   dataIndex: "skuCount",
-      //   width: 72,
-      //   align: "right",
-      //   search: false,
-      // },
-      {
-        title: "订货",
-        dataIndex: "ordered",
-        width: 60,
-        align: "right",
-        search: false,
-        sorter: true,
-        render: (_, row) => (
-          <QtyLink
-            href={`/orders?productId=${encodeURIComponent(row.id)}`}
-            value={row.ordered}
-            title="查看含该款的订货单"
-          />
-        ),
       },
       {
         title: "发货",
@@ -555,6 +508,45 @@ export default function ProductsPage() {
         ),
       },
       {
+        title: "备注",
+        dataIndex: "remark",
+        width: 200,
+        ellipsis: true,
+        search: false,
+        render: (_, row) => <RemarkCell row={row} />,
+      },
+      // {
+      //   title: "材质",
+      //   dataIndex: "material",
+      //   ellipsis: true,
+      //   width: 88,
+      //   search: false,
+      //   render: (_, row) => row.material ?? "—",
+      // },
+      // {
+      //   title: "SKU",
+      //   dataIndex: "skuCount",
+      //   width: 72,
+      //   align: "right",
+      //   search: false,
+      // },
+      {
+        title: "订货",
+        dataIndex: "ordered",
+        width: 60,
+        align: "right",
+        search: false,
+        sorter: true,
+        render: (_, row) => (
+          <QtyLink
+            href={`/orders?productId=${encodeURIComponent(row.id)}`}
+            value={row.ordered}
+            title="查看含该款的订货单"
+          />
+        ),
+      },
+     
+      {
         title: "欠发",
         dataIndex: "shortageVsShipped",
         width: 60,
@@ -570,19 +562,30 @@ export default function ProductsPage() {
           />
         ),
       },
+      
       {
-        title: "备注",
-        dataIndex: "remark",
-        width: 200,
-        ellipsis: true,
+        title: "主图",
+        dataIndex: "imageFileName",
+        width: 88,
         search: false,
-        render: (_, row) => <RemarkCell row={row} />,
+        render: (_, row) =>
+          row.imageFileName ? (
+            // eslint-disable-next-line @next/next/no-img-element -- 本地 API 动态地址
+            <img
+              src={photoPublicUrl(row.imageFileName)}
+              alt=""
+              className="h-12 w-12 rounded-md border border-zinc-200 object-cover dark:border-zinc-700"
+            />
+          ) : (
+            <span className="inline-flex h-12 w-12 items-center justify-center rounded-md border border-dashed border-zinc-300 text-xs text-zinc-400 dark:border-zinc-600">
+              无
+            </span>
+          ),
       },
       {
         title: "操作",
         valueType: "option",
-        width: 120,
-        fixed: "right",
+        width: 170,
         search: false,
         render: (_, row) => (
           <Space size="middle" wrap>
@@ -598,6 +601,30 @@ export default function ProductsPage() {
             >
               编辑
             </Link>
+            <a
+              className="text-sm font-medium text-red-600 underline-offset-2 hover:underline dark:text-red-400"
+              onClick={(e) => {
+                e.preventDefault();
+                Modal.confirm({
+                  title: "确认删除这条衣服档案？",
+                  content: "删除后不可恢复；若该档案已被单据引用将无法删除。",
+                  okText: "删除",
+                  okButtonProps: { danger: true },
+                  cancelText: "取消",
+                  onOk: async () => {
+                    const r = await deleteProductInline(row.id);
+                    if (r?.error) {
+                      message.error(r.error);
+                      return;
+                    }
+                    message.success("已删除衣服档案");
+                    actionRef.current?.reload?.();
+                  },
+                });
+              }}
+            >
+              删除
+            </a>
           </Space>
         ),
       },
@@ -642,17 +669,7 @@ export default function ProductsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">衣服档案</h1>
-        <p className="mt-1 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
-          维护款名、厂家与 SKU。下表汇总该款在所有 SKU 上的
-          <strong className="font-medium text-zinc-800 dark:text-zinc-200">订货 / 厂家发货 / 入库</strong>
-          件数（与「统计 / 对货」口径一致）。
-          <span className="mt-1 block">
-            点击<strong className="font-medium text-zinc-800 dark:text-zinc-200">蓝色数字</strong>
-            可打开对应模块列表（已按该款筛选）；点击
-            <strong className="font-medium text-zinc-800 dark:text-zinc-200">欠发</strong>
-            进入档案内的对货明细（订货 − 发货）。
-          </span>
-        </p>
+        
       </div>
 
       <div className="products-pro-table-wrap overflow-x-auto rounded-lg  bg-white dark:border-zinc-800 dark:bg-zinc-950">
@@ -662,6 +679,9 @@ export default function ProductsPage() {
           rowKey="id"
           formRef={searchFormRef}
           form={{
+            initialValues: {
+              inboundDateRange: INBOUND_DATE_RANGE_PRESETS[0]?.value(),
+            },
             onValuesChange: (changed) => {
               const keys = Object.keys(changed ?? {});
               const immediate =
@@ -701,7 +721,7 @@ export default function ProductsPage() {
           }}
           search={{
             labelWidth: "auto",
-            defaultCollapsed: false,
+            defaultCollapsed: true,
           }}
           options={false}
           pagination={{

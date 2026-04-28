@@ -16,7 +16,7 @@ import { useMemo, useRef, useState } from "react";
 
 import type { ShipmentTableFilterMeta } from "@/app/api/shipments/table/types";
 
-import { createShipmentInline } from "./actions";
+import { createShipmentInline, deleteShipmentInline } from "./actions";
 import type { ShipmentCatalogProduct } from "./shipment-form";
 import {
   ProductListFilterBanner,
@@ -360,7 +360,7 @@ export function ShipmentListPageClient({
       {
         title: "操作",
         valueType: "option",
-        width: 120,
+        width: 170,
         search: false,
         render: (_, row) => [
           <Link
@@ -377,6 +377,31 @@ export function ShipmentListPageClient({
           >
             编辑
           </Link>,
+          <a
+            key="delete"
+            className="text-sm font-medium text-red-600 underline-offset-2 hover:underline dark:text-red-400"
+            onClick={(e) => {
+              e.preventDefault();
+              Modal.confirm({
+                title: "确认删除这条发货记录？",
+                content: "删除后不可恢复，发货明细会一并删除。",
+                okText: "删除",
+                okButtonProps: { danger: true },
+                cancelText: "取消",
+                onOk: async () => {
+                  const r = await deleteShipmentInline(row.id);
+                  if (r?.error) {
+                    message.error(r.error);
+                    return;
+                  }
+                  message.success("已删除发货记录");
+                  actionRef.current?.reload?.();
+                },
+              });
+            }}
+          >
+            删除
+          </a>,
         ],
       },
     ],

@@ -8,7 +8,7 @@ import type {
   ProFormInstance,
 } from "@ant-design/pro-components";
 import { useDebounceFn } from "ahooks";
-import { Button, Upload, message } from "antd";
+import { Button, Modal, Upload, message } from "antd";
 import type { UploadFile } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import Link from "next/link";
@@ -16,7 +16,7 @@ import { useMemo, useRef, useState } from "react";
 
 import type { InboundTableFilterMeta } from "@/app/api/inbound/table/types";
 
-import { createInboundInline } from "./actions";
+import { createInboundInline, deleteInboundInline } from "./actions";
 import {
   ProductListFilterBanner,
   ProductListFilterInvalidBanner,
@@ -295,7 +295,7 @@ export function InboundListPageClient({ catalog, initialQ, initialProductId }: P
       {
         title: "操作",
         valueType: "option",
-        width: 120,
+        width: 170,
         search: false,
         render: (_, row) => [
           <Link
@@ -312,6 +312,31 @@ export function InboundListPageClient({ catalog, initialQ, initialProductId }: P
           >
             编辑
           </Link>,
+          <a
+            key="delete"
+            className="text-sm font-medium text-red-600 underline-offset-2 hover:underline dark:text-red-400"
+            onClick={(e) => {
+              e.preventDefault();
+              Modal.confirm({
+                title: "确认删除这条入库记录？",
+                content: "删除后不可恢复，入库明细会一并删除。",
+                okText: "删除",
+                okButtonProps: { danger: true },
+                cancelText: "取消",
+                onOk: async () => {
+                  const r = await deleteInboundInline(row.id);
+                  if (r?.error) {
+                    message.error(r.error);
+                    return;
+                  }
+                  message.success("已删除入库记录");
+                  actionRef.current?.reload?.();
+                },
+              });
+            }}
+          >
+            删除
+          </a>,
         ],
       },
     ],

@@ -189,6 +189,46 @@ export async function createProductInline(formData: FormData): Promise<ProductFo
   return null;
 }
 
+export async function deleteProductInline(
+  productId: string,
+): Promise<{ error?: string }> {
+  const id = String(productId ?? "").trim();
+  if (!id) return { error: "缺少档案 ID。" };
+
+  const product = await prisma.product.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      skus: { select: { id: true } },
+    },
+  });
+  if (!product) return { error: "档案不存在。" };
+
+  const skuIds = product.skus.map((s) => s.id);
+  if (skuIds.length > 0) {
+    const [o, s, i] = await Promise.all([
+      prisma.orderLine.count({ where: { skuId: { in: skuIds } } }),
+      prisma.shipmentLine.count({ where: { skuId: { in: skuIds } } }),
+      prisma.inboundLine.count({ where: { skuId: { in: skuIds } } }),
+    ]);
+    if (o + s + i > 0) {
+      return { error: "该档案已有订货/发货/入库记录引用，暂不可删除。" };
+    }
+  }
+
+  try {
+    await prisma.product.delete({ where: { id } });
+  } catch (e) {
+    console.error(e);
+    return { error: "删除失败，请稍后重试。" };
+  }
+
+  revalidatePath("/products");
+  revalidatePath(`/products/${id}`);
+  revalidatePath(`/products/${id}/edit`);
+  return {};
+}
+
 export async function createProduct(
   _prev: ProductFormState,
   formData: FormData

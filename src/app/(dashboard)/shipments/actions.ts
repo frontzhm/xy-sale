@@ -208,6 +208,27 @@ export async function createShipmentInline(formData: FormData): Promise<Shipment
   return null;
 }
 
+export async function deleteShipmentInline(
+  recordId: string,
+): Promise<{ error?: string }> {
+  const id = String(recordId ?? "").trim();
+  if (!id) return { error: "缺少发货记录 ID。" };
+
+  try {
+    await prisma.shipmentRecord.delete({
+      where: { id },
+    });
+  } catch (e) {
+    console.error(e);
+    return { error: "删除失败，请稍后重试。" };
+  }
+
+  revalidatePath("/shipments");
+  revalidatePath(`/shipments/${id}`);
+  revalidatePath(`/shipments/${id}/edit`);
+  return {};
+}
+
 export async function createShipment(
   _prev: ShipmentFormState,
   formData: FormData

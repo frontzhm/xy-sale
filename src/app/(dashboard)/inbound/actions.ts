@@ -225,6 +225,27 @@ export async function createInboundInline(formData: FormData): Promise<InboundFo
   return null;
 }
 
+export async function deleteInboundInline(
+  recordId: string,
+): Promise<{ error?: string }> {
+  const id = String(recordId ?? "").trim();
+  if (!id) return { error: "缺少入库记录 ID。" };
+
+  try {
+    await prisma.inboundRecord.delete({
+      where: { id },
+    });
+  } catch (e) {
+    console.error(e);
+    return { error: "删除失败，请稍后重试。" };
+  }
+
+  revalidatePath("/inbound");
+  revalidatePath(`/inbound/${id}`);
+  revalidatePath(`/inbound/${id}/edit`);
+  return {};
+}
+
 export async function createInbound(
   _prev: InboundFormState,
   formData: FormData
