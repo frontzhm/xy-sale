@@ -47,6 +47,149 @@ type UploadApiSuccess = {
 
 type UploadApiFail = { success: false; error?: string };
 
+type WechatJsSdk = {
+  config: (opts: Record<string, unknown>) => void;
+  ready: (cb: () => void) => void;
+  error: (cb: (err: unknown) => void) => void;
+  chooseImage: (opts: {
+    count?: number;
+    sizeType?: ("original" | "compressed")[];
+    sourceType?: ("album" | "camera")[];
+    success?: (res: { localIds?: string[] }) => void;
+    fail?: (err: unknown) => void;
+  }) => void;
+  getLocalImgData: (opts: {
+    localId: string;
+    success?: (res: { localData?: string }) => void;
+    fail?: (err: unknown) => void;
+  }) => void;
+};
+
+let wechatScriptPromise: Promise<WechatJsSdk> | null = null;
+const wechatConfiguredUrls = new Set<string>();
+
+function isWechatBrowser(): boolean {
+  if (typeof window === "undefined") return false;
+  return /micromessenger/i.test(window.navigator.userAgent || "");
+}
+
+function pageUrlForSign(): string {
+  if (typeof window === "undefined") return "";
+  return window.location.href.split("#")[0] ?? "";
+}
+
+async function loadWechatSdk(): Promise<WechatJsSdk> {
+  if (wechatScriptPromise) return wechatScriptPromise;
+  wechatScriptPromise = new Promise<WechatJsSdk>((resolve, reject) => {
+    const existing = (window as typeof window & { wx?: WechatJsSdk }).wx;
+    if (existing) return resolve(existing);
+    const script = document.createElement("script");
+    script.src = "https://res.wx.qq.com/open/js/jweixin-1.6.0.js";
+    script.async = true;
+    script.onload = () => {
+      const wx = (window as typeof window & { wx?: WechatJsSdk }).wx;
+      if (!wx) reject(new Error("微信 JSSDK 加载失败"));
+      else resolve(wx);
+    };
+    script.onerror = () => reject(new Error("微信 JSSDK 脚本加载失败"));
+    document.head.appendChild(script);
+  });
+  return wechatScriptPromise;
+}
+
+async function ensureWechatReady(): Promise<WechatJsSdk> {
+  const wx = await loadWechatSdk();
+  const url = pageUrlForSign();
+  if (!url) throw new Error("当前页面 URL 无效");
+  if (wechatConfiguredUrls.has(url)) return wx;
+  const res = await fetch(`/api/wechat/jssdk-sign?url=${encodeURIComponent(url)}`);
+  const payload = (await res.json()) as
+    | { success: true; data: { appId: string; timestamp: number; nonceStr: string; signature: string } }
+    | { success: false; error?: string };
+  if (!res.ok || !payload.success) {
+    throw new Error(payload.success ? "微信签名失败" : payload.error || "微信签名失败");
+  }
+  await new Promise<void>((resolve, reject) => {
+    wx.config({
+      debug: false,
+      appId: payload.data.appId,
+      timestamp: payload.data.timestamp,
+      nonceStr: payload.data.nonceStr,
+      signature: payload.data.signature,
+      jsApiList: ["chooseImage", "getLocalImgData"],
+    });
+    wx.ready(() => resolve());
+    wx.error((e) => reject(e instanceof Error ? e : new Error("wx.config 校验失败")));
+  });
+  wechatConfiguredUrls.add(url);
+  return wx;
+}
+
+function base64ToFile(localData: string, fileNamePrefix: string): File | null {
+  const raw = String(localData || "").trim();
+  if (!raw) return null;
+  const withPrefix = raw.startsWith("data:image/")
+    ? raw
+    : `data:image/jpeg;base64,${raw.replace(/^data:\s*image\/jgp?g;?base64,?/i, "")}`;
+  const m = withPrefix.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!m?.[1] || !m?.[2]) return null;
+  const mime = m[1];
+  const b64 = m[2].replace(/\s/g, "");
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  const ext = mime.includes("png") ? "png" : "jpg";
+  return new File([u8], `${fileNamePrefix}-${Date.now()}.${ext}`, { type: mime });
+}
+
+async function chooseWechatImageFiles(maxCount: number): Promise<File[]> {
+  const wx = await ensureWechatReady();
+  const localIds = await new Promise<string[]>((resolve, reject) => {
+    wx.chooseImage({
+      count: Math.max(1, maxCount),
+      sizeType: ["compressed"],
+      sourceType: ["album", "camera"],
+      success: (r) => resolve(r.localIds ?? []),
+      fail: reject,
+    });
+  });
+  if (localIds.length === 0) return [];
+
+  const files: File[] = [];
+  for (const localId of localIds) {
+    const localData = await new Promise<string>((resolve, reject) => {
+      wx.getLocalImgData({
+        localId,
+        success: (r) => resolve(String(r.localData ?? "")),
+        fail: reject,
+      });
+    });
+    const f = base64ToFile(localData, "wechat");
+    if (f) files.push(f);
+  }
+  return files;
+}
+
+async function uploadWechatFile(file: File, mode: "inbound" | "shipment"): Promise<UploadFile> {
+  const fd = new FormData();
+  fd.set("file", file);
+  const res = await fetch(`/api/upload?mode=${mode}`, { method: "POST", body: fd });
+  const payload = (await res.json()) as UploadApiSuccess | UploadApiFail;
+  if (!res.ok || !payload.success) {
+    throw new Error(payload.success ? "上传失败" : payload.error || "上传失败");
+  }
+  return {
+    uid: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name: file.name || "wechat-image.jpg",
+    status: "done",
+    url: payload.data.url,
+    response: payload,
+    type: file.type,
+    size: file.size,
+    originFileObj: file as never,
+  };
+}
+
 function formatRecordedAtForServer(v: unknown): string {
   if (v == null || v === "") return "";
   if (dayjs.isDayjs(v)) return v.toISOString();
@@ -234,6 +377,7 @@ export function InboundRegistrationDrawer({
   const [activePhotoKey, setActivePhotoKey] = useState<string>("");
   const [submitMode, setSubmitMode] = useState<"current" | "all">("all");
   const [photoItems, setPhotoItems] = useState<UploadFile[]>([]);
+  const [wechatPicking, setWechatPicking] = useState(false);
   const [draftByPhotoKey, setDraftByPhotoKey] = useState<Record<string, Partial<InboundDrawerValues>>>(
     {},
   );
@@ -272,17 +416,41 @@ export function InboundRegistrationDrawer({
           valuePropName: "fileList",
           getValueFromEvent: (e: { fileList?: UploadFile[] }) => e?.fileList ?? [],
         },
-        renderFormItem: () => (
-          <Upload
-            maxCount={20}
-            multiple
-            accept="image/*"
-            listType="picture"
-            name="file"
-            action="/api/upload?mode=inbound"
-          >
-            <Button>选择照片</Button>
-          </Upload>
+        renderFormItem: (_, config) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <Upload
+              maxCount={20}
+              multiple
+              accept="image/*"
+              listType="picture"
+              name="file"
+              action="/api/upload?mode=inbound"
+            >
+              <Button>选择照片</Button>
+            </Upload>
+            {isWechatBrowser() ? (
+              <Button
+                loading={wechatPicking}
+                onClick={async () => {
+                  try {
+                    setWechatPicking(true);
+                    const current = ((config?.value as UploadFile[] | undefined) ?? []).slice(0, 20);
+                    const remain = Math.max(1, 20 - current.length);
+                    const files = await chooseWechatImageFiles(remain);
+                    if (files.length === 0) return message.warning("当前微信版本未返回可上传图片");
+                    const uploaded = await Promise.all(files.map((f) => uploadWechatFile(f, "inbound")));
+                    config?.onChange?.({ fileList: [...current, ...uploaded].slice(0, 20) });
+                  } catch (e) {
+                    message.error(e instanceof Error ? e.message : "微信上传失败");
+                  } finally {
+                    setWechatPicking(false);
+                  }
+                }}
+              >
+                微信选图
+              </Button>
+            ) : null}
+          </div>
         ),
       },
       {
@@ -362,7 +530,7 @@ export function InboundRegistrationDrawer({
         ],
       },
     ],
-    [],
+    [wechatPicking],
   );
 
   return (
@@ -621,6 +789,7 @@ export function ShipmentRegistrationDrawer({
   const [activePhotoKey, setActivePhotoKey] = useState<string>("");
   const [submitMode, setSubmitMode] = useState<"current" | "all">("all");
   const [photoItems, setPhotoItems] = useState<UploadFile[]>([]);
+  const [wechatPicking, setWechatPicking] = useState(false);
   const [draftByPhotoKey, setDraftByPhotoKey] = useState<Record<string, Partial<ShipmentDrawerValues>>>(
     {},
   );
@@ -695,17 +864,41 @@ export function ShipmentRegistrationDrawer({
           valuePropName: "fileList",
           getValueFromEvent: (e: { fileList?: UploadFile[] }) => e?.fileList ?? [],
         },
-        renderFormItem: () => (
-          <Upload
-            maxCount={20}
-            multiple
-            accept="image/*"
-            listType="picture"
-            name="file"
-            action="/api/upload?mode=shipment"
-          >
-            <Button>选择照片</Button>
-          </Upload>
+        renderFormItem: (_, config) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <Upload
+              maxCount={20}
+              multiple
+              accept="image/*"
+              listType="picture"
+              name="file"
+              action="/api/upload?mode=shipment"
+            >
+              <Button>选择照片</Button>
+            </Upload>
+            {isWechatBrowser() ? (
+              <Button
+                loading={wechatPicking}
+                onClick={async () => {
+                  try {
+                    setWechatPicking(true);
+                    const current = ((config?.value as UploadFile[] | undefined) ?? []).slice(0, 20);
+                    const remain = Math.max(1, 20 - current.length);
+                    const files = await chooseWechatImageFiles(remain);
+                    if (files.length === 0) return message.warning("当前微信版本未返回可上传图片");
+                    const uploaded = await Promise.all(files.map((f) => uploadWechatFile(f, "shipment")));
+                    config?.onChange?.({ fileList: [...current, ...uploaded].slice(0, 20) });
+                  } catch (e) {
+                    message.error(e instanceof Error ? e.message : "微信上传失败");
+                  } finally {
+                    setWechatPicking(false);
+                  }
+                }}
+              >
+                微信选图
+              </Button>
+            ) : null}
+          </div>
         ),
       },
       {
@@ -785,7 +978,7 @@ export function ShipmentRegistrationDrawer({
         ],
       },
     ],
-    [mfrOptions],
+    [mfrOptions, wechatPicking],
   );
 
   return (
