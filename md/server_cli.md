@@ -4,7 +4,7 @@
 
 ```shell
 dig +short xy.sixsixrun.com
-
+# 152.136.177.183
 dig +short xyapi.sixsixrun.com
 ```
 

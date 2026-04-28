@@ -32,11 +32,7 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col">
         <AntdAppProvider>{children}</AntdAppProvider>
-
-        <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-        <script>eruda.init();</script>
       </body>
-      
     </html>
   );
 }
