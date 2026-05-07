@@ -169,16 +169,43 @@ sudo certbot renew --dry-run
 
 ## 8. 更新发布流程
 
-每次代码更新建议按以下顺序：
+### 本机 SSH 一键部署
+
+在本机（已配置好 `ssh han` 等）执行，远程自动进入 `~/xy-sale`：`git pull` → `pnpm install` → `pnpm build` → `pm2 restart xy-sale`。
+
+```bash
+chmod +x scripts/deploy.sh   # 首次
+./scripts/deploy.sh
+```
+
+可选环境变量：`DEPLOY_HOST`（默认 `han`）、`REMOTE_APP`（默认 `xy-sale`，即远端目录 `~/xy-sale`）、`PM2_NAME`（默认 `xy-sale`）。  
+不在远端单独执行 `pnpm start`：由 PM2 托管的应用在 `restart` 时已重启进程。
+
+### 服务器上直接执行
+
+仓库提供脚本（在**服务器**上、于项目根目录执行）：
+
+```bash
+cd /srv/xy-sale   # 或 ~/xy-sale，以实际路径为准
+chmod +x scripts/release.sh   # 首次
+./scripts/release.sh
+```
+
+默认等价于：`git pull` → `pnpm install` → `pnpm build` → `pm2 restart xy-sale`（**不执行** `pnpm db:push`）。  
+改了 `prisma/schema.prisma` 需要同步库表时：`./scripts/release.sh --with-db`。  
+自定义目录或进程名：`APP_DIR=/srv/xy-sale APP_NAME=xy-sale ./scripts/release.sh`。
+
+手工逐步执行亦可：
 
 ```bash
 cd /srv/xy-sale
 git pull
 pnpm install
-pnpm db:push
 pnpm build
 pm2 restart xy-sale
 ```
+
+若本次上线包含 Prisma 结构变更，再在构建前单独执行：`pnpm db:push`（或与脚本 `./scripts/release.sh --with-db`）。
 
 ## 9. 常见问题排查
 

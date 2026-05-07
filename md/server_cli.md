@@ -49,15 +49,18 @@ sudo certbot certificates
 
 ## 6. 发布更新（服务器执行）
 
+本机已配置 `ssh han` 时，可在仓库根目录执行 `./scripts/deploy.sh`，由 SSH 在远端完成 pull / install / build / PM2 重启（见 `md/deploy.md`）。
+
 ```shell
 cd ~/xy-sale
 git pull
 pnpm install
-pnpm db:push
 pnpm build
 pm2 restart xy-sale
 pm2 status
 ```
+
+（若改了 `prisma/schema.prisma`，在 `pnpm build` 前加一步：`pnpm db:push`。）
 
 ### 一键发布脚本（推荐）
 
@@ -76,6 +79,8 @@ chmod +x scripts/release.sh
 ```shell
 APP_DIR=~/xy-sale APP_NAME=xy-sale ./scripts/release.sh
 ```
+
+需要同步库表时：`./scripts/release.sh --with-db`。详见 `./scripts/release.sh --help`。
 
 ## 7. 常用重启（服务器执行）
 
